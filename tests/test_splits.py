@@ -57,8 +57,11 @@ class AjustaSplits(ConSplit):
         self.assertEqual(resumen, {})
 
     def test_el_dia_del_split_ya_es_despues(self):
-        nuevos, _ = self.ajusta([mov(SPLIT, "etf", "compra", 1, round(4 * SERIE[SPLIT], 2))])
+        # Sin precio que mirar (un ajuste), manda la fecha del split de Yahoo: lo de ese
+        # mismo día ya va en participaciones nuevas y lo del día anterior no.
+        nuevos, _ = self.ajusta([mov(SPLIT, "etf", "ajuste", 1, 0), mov("2025-02-28", "etf", "ajuste", 1, 0)])
         self.assertAlmostEqual(nuevos[0]["unidades"], 1)
+        self.assertAlmostEqual(nuevos[1]["unidades"], 4)
 
     def test_sin_importe_o_sin_precio_se_supone_del_broker(self):
         nuevos, _ = self.ajusta([mov("2024-06-03", "etf", "ajuste", 3, 0),
@@ -207,6 +210,156 @@ class VenderTodo(ConSplit):
             m = almacen.guarda_movimiento(cfg, {"producto": "etf", "tipo": "venta", "fecha": VENTA,
                                                 "unidades": "16", "importe": str(IMP_VENTA)})
         self.assertEqual(m["unidades"], 16)
+
+
+# ---------------------------------------------------------------- split deducido del precio
+# Como SPYI.DE: Yahoo da los cierres ajustados al split de 25 por 1 de febrero de 2026, pero
+# no manda el evento. Las compras de antes guardan las participaciones del broker y salen a
+# unas 25 veces el cierre ajustado (con las comisiones, entre 24,9 y 25,35).
+
+SERIE_25 = serie_inventada(base=8, desde="2025-01-01", paso=0.0005)
+ANTES_25 = [f"2025-{m:02d}-16" for m in range(4, 13)] + ["2026-01-16", "2026-02-16"]
+DESPUES_25 = [f"2026-{m:02d}-16" for m in range(3, 7)]
+RUIDO = [0.996, 1.004, 1.014, 0.998, 1.002, 1.0, 1.006, 0.999, 1.003, 1.001, 0.997]
+SPYI = dict(nombre="State Street SPDR MSCI All Country", corto="Stt StrtSPDRMSCIAllCount")
+
+
+def cierre(serie, fecha):
+    return motor.valor_en(serie, fecha)
+
+
+def compras_25(corregidas=False, pid="spyi"):
+    """Once compras de 2 participaciones del broker (50 de después) y cuatro de 50 después del split."""
+    movs = [mov(f, pid, "compra", 50 if corregidas else 2, round(2 * 25 * cierre(SERIE_25, f) * RUIDO[i], 2),
+                mid=f"a{i}") for i, f in enumerate(ANTES_25)]
+    movs += [mov(f, pid, "compra", 50, round(50 * cierre(SERIE_25, f) * RUIDO[i], 2), mid=f"d{i}")
+             for i, f in enumerate(DESPUES_25)]
+    return movs
+
+
+class ConSplitSinEvento(ConCarpeta):
+    def setUp(self):
+        super().setUp()
+        self.cache = guarda_cache_yahoo(self.carpeta, "SPYI.DE", SERIE_25)   # sin fichero de splits
+        self.producto = etf("spyi", "SPYI.DE", **SPYI)
+
+    def construye(self, cfg):
+        with PreciosInventados({"SPYI.DE": SERIE_25}):
+            return motor.construir(cfg, self.carpeta, descargar=False)
+
+
+class DeduceElSplit(ConSplitSinEvento):
+    def test_participaciones_valor_y_rentabilidad(self):
+        D = self.construye(cartera([self.producto], compras_25()))
+        p = D["productos"][0]
+        self.assertAlmostEqual(p["participaciones"], 15 * 50)
+        self.assertAlmostEqual(p["valor"], 750 * SERIE_25[p["navFecha"]], places=2)
+        rent = D["rentabilidadAnual"]
+        for ano, r in zip(rent["anos"], rent["porProducto"]["spyi"]):
+            with self.subTest(ano=ano):
+                self.assertGreater(r, -0.05)       # sube un poco cada día: nada de -96 %
+                self.assertLess(r, 0.3)
+
+    def test_avisa_de_que_lo_deduce(self):
+        D = self.construye(cartera([self.producto], compras_25()))
+        avisos = [a for a in D["avisos"] if "split" in a]
+        self.assertEqual(avisos, ["Stt StrtSPDRMSCIAllCount: deduzco un split de 25 por 1 entre el 16/02/2026 y "
+                                  "el 16/03/2026 por el precio de tus compras; cuento en participaciones de "
+                                  "después del split 11 movimientos anteriores."])
+        self.assertFalse(any("no cuadra" in a for a in D["avisos"]), D["avisos"])
+
+    def test_corregidas_a_mano_dan_lo_mismo_sin_aviso(self):
+        D1 = self.construye(cartera([self.producto], compras_25()))
+        D2 = self.construye(cartera([self.producto], compras_25(corregidas=True)))
+        p1, p2 = D1["productos"][0], D2["productos"][0]
+        for k in ("participaciones", "valor", "aportado", "plusvalia"):
+            with self.subTest(campo=k):
+                self.assertAlmostEqual(p1[k], p2[k], places=6)
+        self.assertEqual(D1["rentabilidadAnual"]["porProducto"], D2["rentabilidadAnual"]["porProducto"])
+        self.assertFalse(any("split" in a or "no cuadra" in a for a in D2["avisos"]), D2["avisos"])
+
+    def test_ajusta_cada_movimiento_y_no_toca_los_originales(self):
+        movs = compras_25()
+        nuevos, resumen = motor.ajusta_splits(movs, [self.producto], cache=self.cache)
+        self.assertEqual([round(m["unidades"], 9) for m in nuevos], [50] * 15)
+        self.assertEqual([m["unidades"] for m in movs], [2] * 11 + [50] * 4)
+        self.assertTrue(all(n is m for n, m in zip(nuevos[11:], movs[11:])))   # los que no cambian, los mismos
+        self.assertEqual(resumen["spyi"]["movimientos"], 11)
+        self.assertEqual(resumen["spyi"]["splits"], {"2026-03-16": 25.0})
+
+    def test_un_ajuste_anterior_al_split_se_multiplica(self):
+        movs = compras_25()
+        movs.insert(3, mov("2025-07-02", "spyi", "ajuste", 10, 0, mid="aj"))
+        nuevos, _ = motor.ajusta_splits(movs, [self.producto], cache=self.cache)
+        self.assertAlmostEqual(nuevos[3]["unidades"], 250)
+        nuevos, _ = motor.ajusta_splits(movs + [mov("2026-04-01", "spyi", "ajuste", 600, 0)], [self.producto],
+                                        cache=self.cache)
+        self.assertAlmostEqual(nuevos[-1]["unidades"], 600)          # después del split, tal cual
+
+    def test_unidades_y_lotes_de_un_dia_anterior_al_split(self):
+        cfg = cartera([self.producto], compras_25())
+        self.assertAlmostEqual(almacen.unidades_a(cfg, "spyi", "2025-10-01", cache=self.cache), 6 * 2)
+        self.assertAlmostEqual(almacen.unidades_a(cfg, "spyi", "2026-04-01", cache=self.cache), 12 * 50)
+        lotes = motor.lotes_vivos(cfg, "spyi", "2025-10-01", cache=self.cache)
+        self.assertEqual([round(l[0], 6) for l in lotes], [2] * 6)
+        lotes = motor.lotes_vivos(cfg, "spyi", "2026-04-01", cache=self.cache)
+        self.assertEqual([round(l[0], 6) for l in lotes], [50] * 12)
+
+    def test_errata_no_se_ajusta_y_avisa(self):
+        movs = compras_25()
+        f = "2026-05-04"
+        # 6,5 veces el cierre: lejos de 5 y de 8 (con 7,3 ya estaría a menos de un 10 % de 8).
+        movs.append(mov(f, "spyi", "compra", 10, round(10 * 6.5 * cierre(SERIE_25, f), 2), mid="raro"))
+        nuevos, _ = motor.ajusta_splits(movs, [self.producto], cache=self.cache)
+        self.assertEqual(nuevos[-1]["unidades"], 10)
+        D = self.construye(cartera([self.producto], movs))
+        raros = [a for a in D["avisos"] if "no cuadra" in a]
+        self.assertEqual(len(raros), 1, D["avisos"])
+        self.assertIn("Stt StrtSPDRMSCIAllCount", raros[0])
+        self.assertIn("04/05/2026", raros[0])
+        self.assertAlmostEqual(D["productos"][0]["participaciones"], 760)
+
+    def test_producto_sin_movimientos_o_sin_cierres(self):
+        nuevos, resumen = motor.ajusta_splits([], [self.producto], cache=self.cache)
+        self.assertEqual((nuevos, resumen), ([], {}))
+        movs = compras_25(pid="x")
+        nuevos, resumen = motor.ajusta_splits(movs, [etf("x", "SINCIERRES.DE")], cache=self.cache)
+        self.assertEqual(nuevos, movs)
+        self.assertEqual(resumen, {})
+
+
+class DeduceEnOtraMoneda(ConCarpeta):
+    """Un producto en dólares: el cierre se pasa a euros con el cambio guardado de cada día."""
+
+    SERIE_USD = serie_inventada(base=30, desde="2024-01-01", paso=0.0003)
+    CAMBIO = serie_inventada(base=0.9, desde="2024-01-01", paso=0.0001)
+    ANTES, DESPUES = ["2024-03-01", "2024-06-03"], ["2025-01-02", "2025-06-02"]
+
+    def setUp(self):
+        super().setUp()
+        self.cache = guarda_cache_yahoo(self.carpeta, "USA", self.SERIE_USD)
+        guarda_cache_yahoo(self.carpeta, "USDEUR=X", self.CAMBIO)
+        self.producto = etf("us", "USA", moneda="USD")
+
+    def compra(self, f, unidades, split=1):
+        return mov(f, "us", "compra", unidades,
+                   round(unidades * split * cierre(self.SERIE_USD, f) * cierre(self.CAMBIO, f), 2))
+
+    def test_split_de_4_por_1(self):
+        movs = [self.compra(f, 3, split=4) for f in self.ANTES] + [self.compra(f, 12) for f in self.DESPUES]
+        nuevos, resumen = motor.ajusta_splits(movs, [self.producto], cache=self.cache)
+        self.assertEqual([round(m["unidades"], 9) for m in nuevos], [12] * 4)
+        self.assertEqual(resumen["us"]["splits"], {"2025-01-02": 4.0})
+
+    def test_el_cambio_solo_no_es_un_split(self):
+        movs = [self.compra(f, 12) for f in self.ANTES + self.DESPUES]
+        nuevos, resumen = motor.ajusta_splits(movs, [self.producto], cache=self.cache)
+        self.assertEqual(nuevos, movs)
+        self.assertEqual(resumen, {})
+        # Sin el cambio guardado se compara en la moneda del producto: 0,9 tampoco es un split.
+        nuevos, resumen = motor.ajusta_splits(movs, [etf("us", "USA", moneda="CHF")], cache=self.cache)
+        self.assertEqual(nuevos, movs)
+        self.assertEqual(resumen, {})
 
 
 if __name__ == "__main__":

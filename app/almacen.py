@@ -304,11 +304,13 @@ def borra_producto(cfg, pid):
 def unidades_a(cfg, pid, fecha_iso, excluir=None, cache=None):
     """Unidades que tenías de un producto al final de ese día (con los traspasos que entran y salen).
     Si ha habido splits, son las de ese día: las de antes del split se multiplican por él
-    (ver motor.ajusta_splits). 'cache' es la carpeta de precios (por defecto, la del motor)."""
+    (ver motor.ajusta_splits; los splits se deducen con todos los movimientos, también los de
+    después). 'cache' es la carpeta de precios (por defecto, la del motor)."""
     total = 0.0
     orden = {"compra": 0, "comision": 1, "dividendo": 2, "venta": 3, "traspaso": 4, "ajuste": 6}
-    movs = [m for m in cfg.get("movimientos", []) if m.get("id") != excluir and m["fecha"] <= fecha_iso]
+    movs = [m for m in cfg.get("movimientos", []) if m.get("id") != excluir]
     movs, _ = motor.ajusta_splits(movs, cfg.get("productos", []), cache, hasta=fecha_iso)
+    movs = [m for m in movs if m["fecha"] <= fecha_iso]
     for m in sorted(movs, key=lambda m: (m["fecha"], orden.get(m.get("tipo"), 9))):
         t = m.get("tipo")
         if m.get("producto") == pid:

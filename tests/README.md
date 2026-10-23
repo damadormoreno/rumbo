@@ -23,7 +23,7 @@ Si todo va bien, termina con `OK`. Las cuentas del navegador y la imagen de «Co
 | `test_almacen.py` | Validaciones en castellano, colores, copias automáticas. |
 | `test_importar.py` | CSV de MyInvestor (con traspasos), plantilla Excel/CSV, texto de la IA, duplicados. |
 | `test_red.py` | Internet simulado: precios diarios y splits de Yahoo, reintentos, mensajes sin conexión. |
-| `test_splits.py` | Splits: las participaciones de antes del split cuentan como las de después (valor, rentabilidad, ventas, traspasos, Renta y «Vender todo»), sin ajustar dos veces las que ya corregiste a mano. |
+| `test_splits.py` | Splits: las participaciones de antes del split cuentan como las de después (valor, rentabilidad, ventas, traspasos, Renta y «Vender todo»), sin ajustar dos veces las que ya corregiste a mano. Si Yahoo no da el split, se deduce del precio de tus movimientos (también en otra moneda) y avisa de los que no cuadran con el de mercado. |
 | `test_servidor.py` | La app de verdad con una carpeta temporal: demo, guardar, copias, web sin importes. |
 | `test_fase_b.py` | Dividendos, exportar a Excel, compras en otra moneda, lanzador de Linux. |
 | `test_repo.py` | Antes de publicar: misma versión en todas partes, lanzadores bien guardados y ningún dato personal. |
