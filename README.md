@@ -303,6 +303,7 @@ fecha;identificador;nombre;tipo_producto;tipo_movimiento;unidades;importe;moneda
 
 - **Unidades**: obligatorias, con todos sus decimales (Rumbo guarda hasta 8). Varias recompensas iguales el mismo día se guardan todas, y volver a importar el mismo extracto (o uno más largo) no duplica las que ya estaban.
 - **Importe**: opcional. Si lo pones, es **lo que valía la recompensa ese día**, no dinero que hayas puesto. Si no lo sabes, déjalo vacío: Rumbo no se inventa ninguno.
+- Si una IA te las devuelve como `dividendo` sin importe en una `cripto`, Rumbo las importa igualmente como staking (un dividendo sin importe no tendría sentido) y en la vista previa las marca con «era dividendo».
 
 Las recompensas suman unidades y se valoran con el precio de cada día, pero **no son compras ni dividendos**: no cuentan como dinero aportado ni como cobros, así que lo que valen sale una sola vez: en tu plusvalía (y en la TIR, como más valor con el mismo dinero). En la ficha del producto verás cuántas has recibido y lo que vale hoy lo que conservas de ellas, aparte de la revalorización. Al vender, el FIFO las gasta después de lo que compraste antes. En **Para la Renta**, su valor de adquisición es lo que valían al recibirlas: si no lo anotaste, Rumbo lo avisa en cada venta afectada en lugar de darlo por cero.
 

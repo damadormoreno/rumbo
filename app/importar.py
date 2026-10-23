@@ -445,11 +445,16 @@ def preparar_tabla(cfg, filas, carpeta):
             continue
         if not tipo:
             plan.error(n, f"El tipo de movimiento «{f.get('tipo_movimiento') or ''}» no es válido: "
-                          "usa compra, venta, dividendo, comision, saldo, traspaso_salida o traspaso_entrada.")
+                          "usa compra, venta, dividendo, comision, saldo, traspaso_salida, traspaso_entrada o staking.")
             continue
         if "error" in (importe, unidades, comision):
             plan.error(n, "Algún número no se entiende (importe, unidades o comisión).")
             continue
+        era_dividendo = tipo == "dividendo" and not importe and unidades and tprod == "cripto"
+        if era_dividendo:
+            # Algunas IA anotan así el staking, aunque el prompt diga «staking». Sin importe no puede ser un
+            # dividendo (se rechazaría), así que entra como recompensa y la vista previa lo marca.
+            tipo = "staking"
         if tipo == "staking":
             # Una recompensa casi nunca trae importe: lo que cuenta son sus unidades, con todos sus decimales.
             if not unidades or es_negativo(f.get("unidades")):
@@ -463,9 +468,10 @@ def preparar_tabla(cfg, filas, carpeta):
                 con_mas_decimales += 1
             tprod = tprod or "cripto"
         elif not importe and tipo not in ("saldo", "ajuste"):
-            # Un «dividendo» con unidades y sin importe en una cripto suele ser staking mal etiquetado.
-            pista = (" Si es una recompensa de staking, pon «staking» en tipo_movimiento: suma sus unidades "
-                     "sin necesitar importe." if tipo == "dividendo" and unidades and tprod == "cripto" else "")
+            # Un «dividendo» con unidades y sin importe (sin decir que es una cripto) puede ser staking.
+            pista = (" Si es una recompensa de staking de una criptomoneda, pon «staking» en tipo_movimiento "
+                     "(o «cripto» en tipo_producto): suma sus unidades sin necesitar importe."
+                     if tipo == "dividendo" and unidades else "")
             plan.error(n, "No tiene importe." + pista)
             continue
         if tipo == "ajuste":
@@ -478,7 +484,7 @@ def preparar_tabla(cfg, filas, carpeta):
         ref = res.producto(n, ident, nombre, tprod)
         if not ref:
             continue
-        marcas = []
+        marcas = ["era «dividendo»"] if era_dividendo else []
 
         # Importes en otra moneda: se pasan a euros con el cambio de ese día.
         if moneda != "EUR" and importe is not None:

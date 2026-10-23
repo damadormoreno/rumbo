@@ -354,9 +354,22 @@ class Importar(ConCarpeta):
         self.assertEqual([e["fila"] for e in inf["errores"]], [2, 3])
         self.assertEqual(inf["errores"][0]["mensaje"], inf["errores"][1]["mensaje"])
 
-    def test_staking_etiquetado_como_dividendo_da_una_pista(self):
+    def test_staking_etiquetado_como_dividendo(self):
         # Así lo devolvió una IA con un extracto de Bit2Me: «dividendo», sin importe y «Staking» en la nota.
-        inf = importa(self.cfg, ["2026-01-05;BTC;BTC;cripto;dividendo;0.00000037;;;0;Staking"], self.carpeta)
+        inf = importa(self.cfg, ["2026-01-05;BTC;BTC;cripto;dividendo;0.00000037;;;0;Staking",
+                                 "2026-01-05;B2M;B2M;cripto;dividendo;-1;;;0;Staking"], self.carpeta)
+        self.assertEqual(inf["añadidos"], 1)
+        self.assertEqual(inf["filas"][0]["tipo"], "staking")
+        self.assertIn("era «dividendo»", inf["filas"][0]["marcas"])
+        self.assertEqual([(m["tipo"], m["unidades"]) for m in self.cfg["movimientos"]], [("staking", 0.00000037)])
+        self.assertIn("en positivo", inf["errores"][0]["mensaje"])     # la negativa sigue rechazada
+
+    def test_un_dividendo_de_verdad_sigue_siendo_dividendo(self):
+        inf = importa(self.cfg, ["2026-01-05;BTC;BTC;cripto;dividendo;;1,5;;;"], self.carpeta)
+        self.assertEqual(self.cfg["movimientos"][0]["tipo"], "dividendo")
+        self.assertEqual(inf["totales"]["dividendos"], 1.5)
+        # Sin decir que es una cripto, sin importe no se adivina: error con la pista.
+        inf = importa(self.cfg, ["2026-01-06;BTC;BTC;;dividendo;0.00000037;;;;"], self.carpeta)
         self.assertIn("pon «staking» en tipo_movimiento", inf["errores"][0]["mensaje"])
         inf = importa(self.cfg, ["2026-01-05;BTC;BTC;cripto;compra;0.00000037;;;;"], self.carpeta)
         self.assertEqual(inf["errores"][0]["mensaje"], "No tiene importe.")
