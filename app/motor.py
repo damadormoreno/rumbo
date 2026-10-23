@@ -443,8 +443,8 @@ CLASE_DEFECTO = {
 }
 FUENTES = {"morningstar": "Morningstar", "yahoo": "Yahoo Finance",
            "coingecko": "CoinGecko", "manual": "Valor anotado a mano"}
-ORDEN_TIPO = {"compra": 0, "comision": 1, "dividendo": 2, "venta": 3, "traspaso_salida": 4, "traspaso_entrada": 5,
-              "ajuste": 6}
+ORDEN_TIPO = {"compra": 0, "comision": 1, "dividendo": 2, "staking": 2, "venta": 3, "traspaso_salida": 4,
+              "traspaso_entrada": 5, "ajuste": 6}
 
 # Carteras de referencia para «¿y si lo hubieras metido en un indexado?». Son ETF
 # reales que cotizan en euros; las piezas son (ticker de Yahoo, peso).
@@ -497,14 +497,15 @@ def fmt_fecha_es(iso):
 
 
 def precios_de_operaciones(movs):
-    """{fecha: precio por unidad} de tus compras y ventas (lo pagado o cobrado, sin comisión)."""
+    """{fecha: precio por unidad} de tus compras y ventas (lo pagado o cobrado, sin comisión)
+    y de tus recompensas de staking valoradas (lo que valían al recibirlas)."""
     out = {}
     for m in sorted(movs, key=lambda m: m["fecha"]):
         u = float(m.get("unidades") or 0)
-        if m.get("tipo") not in ("compra", "venta") or u <= 0:
+        if m.get("tipo") not in ("compra", "venta", "staking") or u <= 0:
             continue
         imp, com = float(m.get("importe") or 0), float(m.get("comision") or 0)
-        neto = imp - com if m.get("tipo") == "compra" else imp + com
+        neto = imp - com if m.get("tipo") == "compra" else imp if m.get("tipo") == "staking" else imp + com
         if neto > 0:
             out[m["fecha"]] = neto / u
     return out
@@ -584,6 +585,19 @@ def expande_traspasos(movimientos):
     return out
 
 
+def de_staking(ref):
+    """None si el lote sale de una compra (o de un traspaso de una compra). Si sale de una
+    recompensa de staking, True si se anotó lo que valía y False si no."""
+    while isinstance(ref, tuple) and len(ref) == 3 and ref[0] == "t":
+        ref = ref[2]   # un traspaso guarda la referencia del lote de origen
+    return ref[2] if isinstance(ref, tuple) and ref[:1] == ("s",) else None
+
+
+def _coste_aportado(trozos):
+    """Lo que pagaste por esos lotes o trozos: el valor de una recompensa de staking no es dinero aportado."""
+    return sum(x[1] for x in trozos if de_staking(x[2]) is None)
+
+
 def _saca_fifo(lotes, unidades):
     """Saca 'unidades' de los lotes, primero los más antiguos. Devuelve (trozos, lo que faltaba).
     Cada trozo es [unidades, coste, ref, fecha de compra]."""
@@ -617,6 +631,10 @@ def aplicar_todos(productos, movs_por, valor_a_mano=None, conservar_lotes=False,
     el coste por FIFO (primero lo mas antiguo), como hace Hacienda: el coste de lo vendido
     sale de "aportado" y la diferencia con lo cobrado es plusvalia realizada.
 
+    Una recompensa de staking es un lote mas, con su fecha, pero sin dinero tuyo: suma unidades
+    y no cambia "aportado" ni es un flujo de la TIR. Su coste en el lote es lo que valia al
+    recibirla (0 si no se anoto), que solo cuenta como valor de adquisicion para Hacienda.
+
     Un traspaso no es una venta: los lotes que salen del origen (con su coste y su fecha de
     compra) pasan al destino, sin plusvalia. Para la TIR de cada producto cuenta como una
     venta y una compra a su valor de ese dia, que en el total se anulan.
@@ -634,7 +652,10 @@ def aplicar_todos(productos, movs_por, valor_a_mano=None, conservar_lotes=False,
                      # intereses, comisiones que no van en una compra; y el coste de lo vendido
                      "ventas": 0.0, "dividendos": 0.0, "gastos": 0.0, "costeVendido": 0.0,
                      # cada venta con las compras de las que salen (para el resumen de la Renta)
-                     "ventasDetalle": []}
+                     "ventasDetalle": [],
+                     # recompensas de staking: [fecha, unidades, lo que valían o None]; y lo que
+                     # queda de ellas al final (unidades, y valor al recibirlas de las valoradas)
+                     "staking": [], "stakingVivas": 0.0, "stakingVivasValor": 0.0, "stakingVivasSinValorar": 0.0}
            for p in productos}
     nombre = {p["id"]: p.get("corto") or p.get("nombre") or p["id"] for p in productos}
     todos = [m for pid, movs in movs_por.items() if pid in est for m in movs
@@ -648,17 +669,24 @@ def aplicar_todos(productos, movs_por, valor_a_mano=None, conservar_lotes=False,
             e["eventos"].append((f, u, imp))
             e["flujos"].append((f, -imp))
             e["comisiones"] += float(m.get("comision") or 0)
+        elif t == "staking":
+            valorada = imp > 0
+            e["lotes"].append([u, imp, ("s", id(m), valorada), f])
+            e["eventos"].append((f, u, 0.0))
+            e["staking"].append([f, u, imp if valorada else None])
         elif t == "venta":
             trozos, quedan = _saca_fifo(e["lotes"], u)
-            coste = sum(x[1] for x in trozos)
+            coste = _coste_aportado(trozos)
             e["vendidas"].update(x[2] for x in trozos)
             if quedan > 1e-6:
                 aviso(f"{nombre[pid]}: el {f} vendes más unidades de las que tienes. Revisa sus movimientos.")
             e["realizado"] += imp - coste
             e["ventas"] += imp - coste
             e["costeVendido"] += coste
+            # Para Hacienda, lo que sale de una recompensa de staking cuesta lo que valía al recibirla.
             e["ventasDetalle"].append({"fecha": f, "unidades": u - quedan, "importe": imp, "coste": coste,
-                                       "compras": [[x[3], x[0], x[1]] for x in trozos],
+                                       "costeFiscal": sum(x[1] for x in trozos),
+                                       "compras": [[x[3], x[0], x[1], de_staking(x[2])] for x in trozos],
                                        "faltan": quedan if quedan > 1e-6 else 0.0})
             e["eventos"].append((f, -(u - quedan), -coste))
             e["flujos"].append((f, imp))
@@ -696,7 +724,7 @@ def aplicar_todos(productos, movs_por, valor_a_mano=None, conservar_lotes=False,
             else:
                 # Sin unidades (un plan anotado a mano): sale todo o la parte que es el importe
                 # de lo que valía ese día.
-                coste_total = sum(l[1] for l in e["lotes"])
+                coste_total = _coste_aportado(e["lotes"])
                 if coste_total <= 1e-9 and aportado_a_mano:
                     # Sin compras anotadas: el coste es lo aportado que apuntaste en sus valores.
                     ap = aportado_a_mano(pid, f)
@@ -711,7 +739,7 @@ def aplicar_todos(productos, movs_por, valor_a_mano=None, conservar_lotes=False,
                 else:
                     fraccion = min(1.0, imp / coste_total) if coste_total else 1.0
                 trozos, salen = _saca_proporcion(e["lotes"], fraccion), 0.0
-            coste = sum(x[1] for x in trozos)
+            coste = _coste_aportado(trozos)
             e["vendidas"].update(x[2] for x in trozos)
             e["eventos"].append((f, -salen, -coste))
             e["flujos"].append((f, imp))
@@ -724,7 +752,7 @@ def aplicar_todos(productos, movs_por, valor_a_mano=None, conservar_lotes=False,
                 continue
             # Los lotes llegan al destino con su coste y su fecha de compra (por eso se
             # colocan por fecha entre los que ya tenía) y con las participaciones nuevas.
-            base = salen if tiene_unidades and salen > 1e-12 else coste
+            base = salen if tiene_unidades and salen > 1e-12 else sum(x[1] for x in trozos)
             for tu, tc, ref, lf in trozos:
                 peso = (tu if tiene_unidades and salen > 1e-12 else tc) / base if base else 1.0 / len(trozos)
                 nuevo = [ud * peso, tc, ("t", m.get("_tid"), ref), lf]
@@ -739,8 +767,14 @@ def aplicar_todos(productos, movs_por, valor_a_mano=None, conservar_lotes=False,
             d_["traspasos"].append({"fecha": f, "tipo": "entrada", "otro": pid, "importe": r2(imp),
                                     "unidades": r4(ud) if ud else None, "coste": r2(coste),
                                     "total": bool(m.get("total")), "estimada": bool(m.get("fechaEstimada"))})
-    if not conservar_lotes:
-        for e in est.values():
+    for e in est.values():
+        for lu, lc, ref, _ in e["lotes"]:
+            valorada = de_staking(ref)
+            if valorada is not None:
+                e["stakingVivas"] += lu
+                e["stakingVivasValor"] += lc
+                e["stakingVivasSinValorar"] += 0.0 if valorada else lu
+        if not conservar_lotes:
             e.pop("lotes")
     return est
 
@@ -805,6 +839,24 @@ def snaps_con_traspasos(snaps, traspasos):
 def aplicar_movimientos(p, movs):
     """Los movimientos de un solo producto (ver aplicar_todos)."""
     return aplicar_todos([p], {p["id"]: movs})[p["id"]]
+
+
+def resumen_staking(mv, precio):
+    """
+    Lo que te ha dado el staking en un producto: cada recompensa (con lo que valía al
+    recibirla, si lo anotaste) y lo que conservas de ellas (por FIFO, las recompensas se
+    venden después de lo que compraste antes), con lo que vale hoy. None si no hay ninguna.
+    """
+    rec = mv["staking"]
+    if not rec:
+        return None
+    vivas = mv["stakingVivas"]
+    return {"numero": len(rec), "unidades": round(sum(x[1] for x in rec), 8),
+            "valorRecibido": r2(sum(x[2] for x in rec if x[2] is not None)),
+            "sinValorar": sum(1 for x in rec if x[2] is None),
+            "vivas": round(vivas, 8), "valorHoy": r2(vivas * precio) if precio and vivas > 1e-12 else None,
+            "recompensas": [{"fecha": f, "unidades": round(u, 8), "valor": None if v is None else round(v, 4)}
+                            for f, u, v in rec]}
 
 
 def resumen_dividendos(movimientos, productos, fecha_extracto):
@@ -1072,6 +1124,7 @@ def construir(cfg, carpeta, descargar=True, cache=None, historico=True):
                     # De una compra ya vendida (toda o en parte) no se enseña "cuánto vale hoy".
                     "valor": None if id(m) in mv["vendidas"] else round(u * nav_hoy, 2),
                 })
+            p["staking"] = resumen_staking(mv, nav_hoy)
         else:
             p["origen"] = "manual"
             if not snaps:
@@ -1081,6 +1134,7 @@ def construir(cfg, carpeta, descargar=True, cache=None, historico=True):
             for m in movs:
                 if m.get("tipo") == "compra":
                     p["aportaciones"].append({"fecha": m["fecha"], "importe": round(float(m.get("importe") or 0), 2)})
+            p["staking"] = resumen_staking(mv, None)   # valorado a mano: sin precio por unidad
 
         pf = d(min(fechas_p))
         primera = pf if primera is None else min(primera, pf)
@@ -1133,13 +1187,20 @@ def construir(cfg, carpeta, descargar=True, cache=None, historico=True):
             p["serie"] = serie_valor
             p["serieAportado"] = serie_ap
             p["navSerie"] = [r4(v) for v in nav_diario]
-            p["participaciones"] = round(part_acum[-1], 6)
+            # En cripto, todos los decimales: una recompensa de staking puede ser de unos satoshis.
+            dec = 8 if p["tipoClave"] == "cripto" else 6
+            p["participaciones"] = round(part_acum[-1], dec)
             p["valor"] = serie_valor[-1] or 0.0
             p["aportado"] = round(ap_acum[-1], 2)
             p["desde"] = min(e[0] for e in p["_mv"]["eventos"])
             if origen == "ordenes":
-                p["titulos"] = round(part_acum[-1], 4)
-                p["precioMedio"] = r4(p["aportado"] / part_acum[-1]) if part_acum[-1] else None
+                p["titulos"] = round(part_acum[-1], dec if p["tipoClave"] == "cripto" else 4)
+                # Lo que pagaste por cada unidad comprada que tienes: las del staking no se compraron.
+                compradas = part_acum[-1] - p["_mv"]["stakingVivas"]
+                if p["_mv"]["stakingVivas"]:
+                    p["precioMedio"] = r4(p["aportado"] / compradas) if p["aportado"] and compradas > 1e-12 else None
+                else:
+                    p["precioMedio"] = r4(p["aportado"] / part_acum[-1]) if part_acum[-1] else None
                 p["precioActual"] = r4(p["nav"])
 
         else:  # manual: interpola entre snapshots

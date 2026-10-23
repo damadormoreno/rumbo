@@ -11,7 +11,8 @@ from .importar import COLUMNAS
 
 TIPOS_PRODUCTO = ["fondo", "etf", "accion", "cripto", "commodity", "bono", "pension",
                   "efectivo", "inmueble", "deuda", "p2p", "otro"]
-TIPOS_MOVIMIENTO = ["compra", "venta", "dividendo", "comision", "saldo", "traspaso_salida", "traspaso_entrada", "ajuste"]
+TIPOS_MOVIMIENTO = ["compra", "venta", "dividendo", "comision", "saldo", "traspaso_salida", "traspaso_entrada", "ajuste",
+                    "staking"]
 
 EXPLICACION = [
     ("fecha", "Sí", "Día de la operación. Por ejemplo 10/03/2025."),
@@ -20,9 +21,12 @@ EXPLICACION = [
     ("tipo_producto", "No", "fondo, etf, accion, cripto, commodity, bono, pension, efectivo, inmueble, deuda, p2p u otro."),
     ("tipo_movimiento", "Sí", "compra, venta, dividendo, comision o saldo (el saldo de una cuenta en esa fecha). "
                               "Un traspaso entre fondos son dos filas con la misma fecha e importe: traspaso_salida "
-                              "(el fondo de origen) y traspaso_entrada (el de destino)."),
-    ("unidades", "Recomendado", "Participaciones, acciones u onzas. Si lo dejas vacío, se calculan con el precio de ese día."),
-    ("importe", "Sí", "Dinero total. Compra: lo que salió de tu cuenta, con comisiones. Venta o dividendo: lo que entró."),
+                              "(el fondo de origen) y traspaso_entrada (el de destino). "
+                              "staking: una recompensa de staking de una criptomoneda (unidades que recibes sin pagar)."),
+    ("unidades", "Recomendado", "Participaciones, acciones u onzas. Si lo dejas vacío, se calculan con el precio de ese día. "
+                                "En staking es obligatorio: las unidades recibidas, con todos sus decimales (hasta 8)."),
+    ("importe", "Sí", "Dinero total. Compra: lo que salió de tu cuenta, con comisiones. Venta o dividendo: lo que entró. "
+                      "En staking es opcional: lo que valía la recompensa ese día. Si no lo sabes, déjalo vacío."),
     ("moneda", "No", "Moneda del importe. Si no es EUR, se convierte con el cambio de ese día. Vacío = EUR."),
     ("comision", "No", "Comisión de la operación, ya incluida en el importe."),
     ("nota", "No", "Lo que quieras apuntar."),
@@ -31,6 +35,7 @@ EJEMPLO = [
     (dt.date(2025, 3, 10), "IE00BYX5NX33", "Fidelity MSCI World", "fondo", "compra", 62.5, 900, "EUR", None, "Aportación mensual"),
     (dt.date(2025, 4, 2), "AAPL", "Apple", "accion", "compra", 5, 1050, "USD", 2, ""),
     (dt.date(2025, 5, 15), "BTC-EUR", "Bitcoin", "cripto", "compra", 0.01, 600, "EUR", None, ""),
+    (dt.date(2025, 6, 1), "BTC-EUR", "Bitcoin", "cripto", "staking", 0.00000037, None, "EUR", None, "Recompensa de staking"),
     (dt.date(2025, 6, 30), "AAPL", "Apple", "accion", "dividendo", None, 1.25, "USD", None, ""),
     (dt.date(2025, 6, 30), "", "Cuenta del banco", "efectivo", "saldo", None, 2500, "EUR", None, "Saldo a fin de mes"),
 ]
@@ -114,7 +119,7 @@ def excel():
 def mis_datos(cfg):
     """
     Toda tu cartera en un Excel. La hoja «Movimientos» tiene el formato de la
-    plantilla (compras, ventas, dividendos, comisiones y saldos), así que se puede
+    plantilla (compras, ventas, dividendos, comisiones, staking y saldos), así que se puede
     abrir en Excel o Google Sheets y también volver a importar. «Productos» lleva
     la ficha de cada uno.
     """
