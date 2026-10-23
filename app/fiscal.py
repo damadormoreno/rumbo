@@ -11,6 +11,8 @@ Lo que hace falta para repasar el borrador de un año:
 - los dividendos, cupones e intereses cobrados, tal y como los anotaste (normalmente, lo que
   te ingresaron, ya sin retención: en la Renta va el bruto y la retención aparte);
 - las comisiones que pagaste aparte de una compra o una venta;
+- las recompensas de staking que recibiste, con lo que valían si lo anotaste. Al venderlas,
+  su valor de adquisición es lo que valían al recibirlas: si no está anotado, se avisa;
 - los rescates de planes de pensiones, aparte: no son una ganancia patrimonial.
 
 Y avisa de lo que conviene revisar a mano (la regla de los dos meses, traspasos que no
@@ -57,7 +59,7 @@ def isin_de(p):
 
 def anos_con_datos(cfg):
     return sorted({m["fecha"][:4] for m in cfg.get("movimientos", [])
-                   if m.get("tipo") in ("venta", "dividendo", "comision", "traspaso") and m.get("fecha")},
+                   if m.get("tipo") in ("venta", "dividendo", "comision", "traspaso", "staking") and m.get("fecha")},
                   reverse=True)
 
 
@@ -93,12 +95,15 @@ def informe(cfg, ano=None, hoy=None, cache=None):
         for v in e.get("ventasDetalle", []):
             if v["fecha"][:4] != ano:
                 continue
-            compras = [{"fecha": f, "unidades": round(u, 6), "coste": r2(c)} for f, u, c in v["compras"]]
+            dec = 8 if tipo == "cripto" else 6   # en cripto, todos los decimales (staking)
+            compras = [{"fecha": f, "unidades": round(u, dec), "coste": r2(c),
+                        **({"staking": True} if staking is not None else {})} for f, u, c, staking in v["compras"]]
+            coste = v.get("costeFiscal", v["coste"])
             linea = {"producto": pid, "nombre": nombre(pid), "isin": isin_de(p),
                      "tipo": motor.TIPOS.get(tipo, "Otro"), "fecha": v["fecha"],
-                     "unidades": round(v["unidades"] + v["faltan"], 6) if v["unidades"] + v["faltan"] else None,
-                     "transmision": r2(v["importe"]), "adquisicion": r2(v["coste"]),
-                     "ganancia": r2(v["importe"] - v["coste"]), "compras": compras, "avisos": []}
+                     "unidades": round(v["unidades"] + v["faltan"], dec) if v["unidades"] + v["faltan"] else None,
+                     "transmision": r2(v["importe"]), "adquisicion": r2(coste),
+                     "ganancia": r2(v["importe"] - coste), "compras": compras, "avisos": []}
             if tipo == "pension":
                 rescates.append(linea)
                 continue
@@ -112,7 +117,16 @@ def informe(cfg, ano=None, hoy=None, cache=None):
             elif v["faltan"]:
                 linea["avisos"].append("Vendes más de lo que tenías anotado: falta alguna compra y la ganancia "
                                        "no es fiable.")
-            if compras and any(c["coste"] <= 0 for c in compras):
+            sin_valorar = sorted({c["fecha"] for c, (*_, staking) in zip(compras, v["compras"]) if staking is False})
+            if sin_valorar:
+                # No es un coste 0: es un dato que falta, y la ganancia sale más alta de lo que es.
+                linea["adquisicionIncompleta"] = True
+                linea["avisos"].append(
+                    f"Parte de lo vendido ({motor.fmt_fecha_es(sin_valorar[0])}"
+                    f"{' y otras fechas' if len(sin_valorar) > 1 else ''}) son recompensas de staking sin valorar: "
+                    "su valor de adquisición es lo que valían el día que las recibiste, y no está anotado. "
+                    "La ganancia que ves no lo descuenta: anótalo en Movimientos (o revísalo con tu exchange).")
+            if compras and any(c["coste"] <= 0 and not c.get("staking") for c in compras):
                 linea["avisos"].append("Parte de lo vendido no tiene coste anotado (viene de cuadrar participaciones "
                                        "o de un traspaso sin coste). Revisa su valor de adquisición.")
             meses = VENTANA_RECOMPRA.get(tipo)
@@ -127,7 +141,7 @@ def informe(cfg, ano=None, hoy=None, cache=None):
     ventas.sort(key=lambda x: (x["fecha"], x["nombre"]))
     rescates.sort(key=lambda x: x["fecha"])
 
-    cobros, comisiones, gastos_piso = {}, defaultdict(float), defaultdict(float)
+    cobros, comisiones, gastos_piso, staking = {}, defaultdict(float), defaultdict(float), {}
     for m in movs:
         if m.get("fecha", "")[:4] != ano or m.get("producto") not in productos:
             continue
@@ -142,6 +156,13 @@ def informe(cfg, ano=None, hoy=None, cache=None):
             x["importe"] += imp
         elif m.get("tipo") == "comision":
             (gastos_piso if tipo_p == "inmueble" else comisiones)[m["producto"]] += imp
+        elif m.get("tipo") == "staking":
+            x = staking.setdefault(m["producto"], {"producto": m["producto"], "nombre": nombre(m["producto"]),
+                                                   "recompensas": 0, "unidades": 0.0, "valorado": 0.0, "sinValorar": 0})
+            x["recompensas"] += 1
+            x["unidades"] += float(m.get("unidades") or 0)
+            x["valorado"] += imp
+            x["sinValorar"] += 0 if imp > 0 else 1
         elif m.get("tipo") == "traspaso":
             o, d_ = productos.get(m["producto"]) or {}, productos.get(m.get("destino")) or {}
             ok = (o.get("tipo"), d_.get("tipo")) in (("fondo", "fondo"), ("pension", "pension"))
@@ -155,6 +176,8 @@ def informe(cfg, ano=None, hoy=None, cache=None):
                   for pid, v in sorted(comisiones.items(), key=lambda kv: -kv[1]) if v]
     gastos_piso = [{"producto": pid, "nombre": nombre(pid), "importe": r2(v)}
                    for pid, v in sorted(gastos_piso.items(), key=lambda kv: -kv[1]) if v]
+    staking = sorted(({**x, "unidades": round(x["unidades"], 8), "valorado": r2(x["valorado"])}
+                      for x in staking.values()), key=lambda x: x["nombre"])
 
     con_coste = [v for v in ventas if v["adquisicion"] is not None]
     totales = {
@@ -169,6 +192,8 @@ def informe(cfg, ano=None, hoy=None, cache=None):
         "gastosAlquiler": r2(sum(x["importe"] for x in gastos_piso)),
         "comisiones": r2(sum(x["importe"] for x in comisiones)),
         "rescates": r2(sum(v["transmision"] for v in rescates)),
+        "staking": r2(sum(x["valorado"] for x in staking)),
+        "stakingSinValorar": sum(x["sinValorar"] for x in staking),
     }
     if any(x["clase"] == "Alquileres" for x in cobros) or gastos_piso:
         avisos.append("Los alquileres van en su propio apartado de la Renta (rendimientos del capital inmobiliario), con "
@@ -181,8 +206,16 @@ def informe(cfg, ano=None, hoy=None, cache=None):
     if rescates:
         avisos.append("Lo que rescatas de un plan de pensiones no es una ganancia patrimonial: tributa como "
                       "rendimiento del trabajo (todo lo que sacas, no solo lo ganado). Va aparte.")
+    if staking:
+        sin = totales["stakingSinValorar"]
+        avisos.append("Recompensas de staking: Hacienda suele tratarlas como rendimiento del capital mobiliario por lo "
+                      "que valían el día que las recibiste, y ese valor es también su coste cuando las vendas. "
+                      + (f"{sin} de este año no tienen ese valor anotado: Rumbo no lo inventa, así que el total que "
+                         "ves no las incluye. Búscalo en el informe fiscal de tu exchange." if sin else
+                         "Compruébalo con el informe fiscal de tu exchange."))
     return {"ano": ano, "anos": anos, "ventas": ventas, "rescates": rescates, "cobros": cobros,
-            "comisiones": comisiones, "gastosAlquiler": gastos_piso, "totales": totales, "avisos": avisos}
+            "comisiones": comisiones, "gastosAlquiler": gastos_piso, "staking": staking,
+            "totales": totales, "avisos": avisos}
 
 
 def csv_texto(inf):
@@ -218,6 +251,12 @@ def csv_texto(inf):
         w.writerow(["Gastos de inmuebles anotados", "Importe"])
         for x in inf["gastosAlquiler"]:
             w.writerow([x["nombre"], num(x["importe"])])
+    if inf.get("staking"):
+        w.writerow([])
+        w.writerow(["Recompensas de staking", "Recompensas", "Unidades", "Valor anotado", "Sin valorar"])
+        for x in inf["staking"]:
+            w.writerow([x["nombre"], x["recompensas"], f"{x['unidades']:.8f}".rstrip("0").rstrip(".").replace(".", ","),
+                        num(x["valorado"]), x["sinValorar"]])
     if inf["rescates"]:
         w.writerow([])
         w.writerow(["Rescates de planes de pensiones (rendimiento del trabajo)", "Fecha", "Importe"])

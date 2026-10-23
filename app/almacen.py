@@ -17,7 +17,8 @@ from .motor import TIPOS, FUENTES, num_es
 
 COPIAS_MAX = 20
 TIPOS_MOV = {"compra": "Compra", "venta": "Venta", "dividendo": "Dividendo, cupón o interés",
-             "comision": "Comisión", "traspaso": "Traspaso", "ajuste": "Ajuste de participaciones"}
+             "comision": "Comisión", "traspaso": "Traspaso", "ajuste": "Ajuste de participaciones",
+             "staking": "Recompensa de staking"}
 SOLO_SALDO = ("efectivo", "deuda")   # tipos que se siguen solo con saldos anotados
 
 CARTERA_VACIA = {
@@ -307,7 +308,7 @@ def unidades_a(cfg, pid, fecha_iso, excluir=None, cache=None):
     (ver motor.ajusta_splits; los splits se deducen con todos los movimientos, también los de
     después). 'cache' es la carpeta de precios (por defecto, la del motor)."""
     total = 0.0
-    orden = {"compra": 0, "comision": 1, "dividendo": 2, "venta": 3, "traspaso": 4, "ajuste": 6}
+    orden = {"compra": 0, "comision": 1, "dividendo": 2, "staking": 2, "venta": 3, "traspaso": 4, "ajuste": 6}
     movs = [m for m in cfg.get("movimientos", []) if m.get("id") != excluir]
     movs, _ = motor.ajusta_splits(movs, cfg.get("productos", []), cache, hasta=fecha_iso)
     movs = [m for m in movs if m["fecha"] <= fecha_iso]
@@ -318,7 +319,7 @@ def unidades_a(cfg, pid, fecha_iso, excluir=None, cache=None):
             if t == "ajuste":
                 total = u   # el ajuste dice cuántas tienes, no cuántas cambian
             else:
-                total += u if t == "compra" else -u if t in ("venta", "traspaso") else 0
+                total += u if t in ("compra", "staking") else -u if t in ("venta", "traspaso") else 0
         if t == "traspaso" and m.get("destino") == pid:
             total += float(m.get("unidadesDestino") or 0)
     return total
@@ -329,6 +330,8 @@ def guarda_movimiento(cfg, datos):
         return guarda_traspaso(cfg, datos)
     if datos.get("tipo") == "ajuste":
         return guarda_ajuste(cfg, datos)
+    if datos.get("tipo") == "staking":
+        return guarda_staking(cfg, datos)
     errores = []
     p = producto(cfg, datos.get("producto"))
     if not p:
@@ -464,6 +467,49 @@ def guarda_ajuste(cfg, datos):
     nota = texto(datos.get("nota"))
     calculadas = unidades_a(cfg, p["id"], f, excluir=datos.get("id"))
     mov["nota"] = nota or f"Rumbo calculaba {fmt_unidades(calculadas)}"
+    lista = cfg.setdefault("movimientos", [])
+    existente = next((m for m in lista if m.get("id") == datos.get("id")), None) if datos.get("id") else None
+    if existente:
+        existente.clear()
+        existente.update(id=datos["id"], **mov)
+        return existente
+    mov = {"id": siguiente_id(lista, "m"), **mov}
+    lista.append(mov)
+    lista.sort(key=lambda m: m["fecha"])
+    return mov
+
+
+def guarda_staking(cfg, datos):
+    """
+    Recompensa de staking de una criptomoneda: unidades nuevas que no te han costado dinero.
+    El importe es opcional: si lo pones, es lo que valía la recompensa el día que la recibiste
+    (su valor de adquisición para Hacienda), no dinero que hayas aportado. Si no lo pones, no
+    se inventa: la recompensa queda sin valorar y el resumen para la Renta lo avisa.
+    """
+    errores = []
+    p = producto(cfg, datos.get("producto"))
+    if not p:
+        errores.append("Elige el producto.")
+    elif p.get("tipo") != "cripto":
+        errores.append(f"«{p.get('corto') or p['nombre']}» no es una criptomoneda: las recompensas de staking "
+                       "solo se anotan en productos de tipo «Criptomoneda».")
+    f = fecha(datos.get("fecha"), errores)
+    unidades = numero(datos.get("unidades"), "cuántas unidades recibiste", errores, mayor_que=0)
+    if unidades and round(unidades, 8) <= 0:
+        errores.append("La recompensa es de menos de 0,00000001 unidades: Rumbo guarda las unidades con 8 decimales.")
+    importe = numero(datos.get("importe"), "lo que valía la recompensa", errores, obligatorio=False, minimo=0)
+    comision = numero(datos.get("comision"), "la comisión", errores, obligatorio=False, minimo=0)
+    if errores:
+        raise ErrorValidacion(errores)
+
+    mov = {"fecha": f, "producto": p["id"], "tipo": "staking", "unidades": round(unidades, 8)}
+    if importe:
+        # Con 2 decimales, una recompensa de unos céntimos perdería buena parte de su valor.
+        mov["importe"] = round(importe, 6)
+    if comision:
+        mov["comision"] = round(comision, 2)
+    if texto(datos.get("nota")):
+        mov["nota"] = texto(datos.get("nota"))
     lista = cfg.setdefault("movimientos", [])
     existente = next((m for m in lista if m.get("id") == datos.get("id")), None) if datos.get("id") else None
     if existente:

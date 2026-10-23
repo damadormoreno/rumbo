@@ -18,6 +18,8 @@ import datetime as dt
 import io
 import re
 import unicodedata
+from collections import Counter
+from decimal import Decimal, InvalidOperation
 
 from . import almacen, buscar, motor
 from .motor import num_es, valor_en
@@ -47,6 +49,7 @@ TIPO_MOV = {
     "traspaso salida": "traspaso_salida", "traspaso de salida": "traspaso_salida", "traspaso origen": "traspaso_salida",
     "traspaso entrada": "traspaso_entrada", "traspaso de entrada": "traspaso_entrada", "traspaso destino": "traspaso_entrada",
     "ajuste": "ajuste", "ajuste de participaciones": "ajuste",
+    "staking": "staking", "recompensa": "staking", "recompensa de staking": "staking", "staking reward": "staking",
 }
 TIPO_PROD = {
     "fondo": "fondo", "fondo de inversion": "fondo", "etf": "etf", "etp": "etf",
@@ -269,12 +272,35 @@ def lee_fecha(v):
         return None
 
 
+def decimales(v):
+    """Cuántos decimales trae un número escrito ("0,00000037" -> 8), sin pasar por float. None si no se entiende."""
+    if isinstance(v, (int, float)):
+        t = repr(float(v))
+    else:
+        t = str(v or "").strip().replace(" ", "")
+        if "," in t and "." in t:
+            t = t.replace(".", "")
+        t = t.replace(",", ".")
+    try:
+        exp = Decimal(t).normalize().as_tuple().exponent
+    except InvalidOperation:
+        return None
+    return max(0, -exp) if isinstance(exp, int) else None
+
+
+def es_negativo(v):
+    """lee_numero() quita el signo (los extractos ponen las ventas en negativo): esto dice si lo tenía."""
+    return v < 0 if isinstance(v, (int, float)) else str(v or "").strip().startswith("-")
+
+
 def lee_numero(v):
     if v is None or (isinstance(v, str) and not v.strip()):
         return None
     if isinstance(v, (int, float)):
         return abs(float(v))
     t = str(v).strip().replace("€", "").replace("$", "").replace(" ", "")
+    if re.fullmatch(r"[-+]?\d+([.,]\d+)?[eE][-+]?\d+", t):
+        return abs(float(t.replace(",", ".")))   # 3,7E-07: así guarda Excel las unidades muy pequeñas
     if not re.fullmatch(r"[-+]?[\d.,]+", t):
         return "error"
     return abs(num_es(t))
@@ -319,26 +345,34 @@ class Resolutor:
     def __init__(self, cfg, plan, carpeta):
         self.cfg, self.plan, self.carpeta = cfg, plan, carpeta
         self.cache, self.series, self.frescas = {}, {}, set()
+        self.fallos = {}   # por qué no se encontró un producto, para repetirlo en cada fila suya
 
     def producto(self, fila, identificador, nombre, tipo_prod):
         clave = ((identificador or "").strip().upper(), sin_tildes(nombre) if not identificador else "")
         if clave in self.cache:
+            if clave in self.fallos:
+                # Cada fila que no se importa sale en la lista, no solo la primera de ese producto.
+                self.plan.error(fila, self.fallos[clave])
             return self.cache[clave]
-        ref = None
+        ref, n_errores = None, len(self.plan.errores)
         existente = _producto_existente(self.cfg, identificador, nombre)
         if existente:
             ref = existente["id"]
         elif identificador:
             n_fallos = len(buscar.FALLOS)
             res = buscar.buscar(identificador)
+            # Si la fila dice el tipo de producto, el candidato de ese tipo («BTC» es también un ETF). Una
+            # cripto que solo aparece como fondo o acción («EURR» es también un fondo) no es esa cripto.
+            r = next((x for x in res if x.get("tipo") == tipo_prod), res[0]) if res else None
+            if r and tipo_prod == "cripto" and r["tipo"] != "cripto":
+                r = None
             if not res and buscar.hubo_fallos_desde(n_fallos):
                 self.plan.error(fila, f"No he podido consultar «{identificador}» en internet ahora mismo "
                                       "(la conexión ha fallado o Yahoo/Morningstar no han respondido). "
                                       "Comprueba tu conexión y vuelve a pulsar «Previsualizar»: suele bastar "
                                       "con intentarlo otra vez.")
                 ref = None
-            elif res:
-                r = res[0]
+            elif r:
                 fi = r.get("ficha") or {}
                 datos = {"nombre": nombre or r.get("nombre") or r["codigo"], "tipo": r["tipo"],
                          "identificador": identificador.strip(), "fuente": r["fuente"], "codigo": r["codigo"],
@@ -346,6 +380,11 @@ class Resolutor:
                          "ter": fi.get("ter"), "riesgo": fi.get("riesgo"), "clase": fi.get("clase") or "",
                          "gestora": fi.get("gestora") or "", "largoPlazo": True}
                 ref = self._nuevo(datos, r)
+            elif res:
+                self.plan.error(fila, f"No encuentro «{identificador}» como criptomoneda con precio en internet "
+                                      "(solo productos de otro tipo con ese nombre). Si no cotiza, créalo en Productos "
+                                      "como «Criptomoneda» con «Valor anotado a mano» y ese mismo identificador, "
+                                      "y vuelve a importar.")
             else:
                 self.plan.error(fila, f"No encuentro «{identificador}» con precio en internet. Si no cotiza, "
                                       "créalo en Productos con «Valor anotado a mano» y ese mismo "
@@ -356,6 +395,8 @@ class Resolutor:
                                "largoPlazo": tipo not in ("efectivo", "deuda")}, None)
         else:
             self.plan.error(fila, "No tiene identificador ni nombre: no sé de qué producto es.")
+        if ref is None and len(self.plan.errores) > n_errores:
+            self.fallos[clave] = self.plan.errores[-1]["mensaje"]
         self.cache[clave] = ref
         return ref
 
@@ -388,7 +429,7 @@ def preparar_tabla(cfg, filas, carpeta):
     """Plantilla o texto de la IA -> Plan."""
     plan = Plan()
     res = Resolutor(cfg, plan, carpeta)
-    cambios, traspasos = {}, []
+    cambios, traspasos, con_mas_decimales = {}, [], 0
     for n, f in filas:
         fecha = lee_fecha(f.get("fecha"))
         tipo = TIPO_MOV.get(sin_tildes(f.get("tipo_movimiento")))
@@ -404,13 +445,34 @@ def preparar_tabla(cfg, filas, carpeta):
             continue
         if not tipo:
             plan.error(n, f"El tipo de movimiento «{f.get('tipo_movimiento') or ''}» no es válido: "
-                          "usa compra, venta, dividendo, comision, saldo, traspaso_salida o traspaso_entrada.")
+                          "usa compra, venta, dividendo, comision, saldo, traspaso_salida, traspaso_entrada o staking.")
             continue
         if "error" in (importe, unidades, comision):
             plan.error(n, "Algún número no se entiende (importe, unidades o comisión).")
             continue
-        if not importe and tipo not in ("saldo", "ajuste"):
-            plan.error(n, "No tiene importe.")
+        era_dividendo = tipo == "dividendo" and not importe and unidades and tprod == "cripto"
+        if era_dividendo:
+            # Algunas IA anotan así el staking, aunque el prompt diga «staking». Sin importe no puede ser un
+            # dividendo (se rechazaría), así que entra como recompensa y la vista previa lo marca.
+            tipo = "staking"
+        if tipo == "staking":
+            # Una recompensa casi nunca trae importe: lo que cuenta son sus unidades, con todos sus decimales.
+            if not unidades or es_negativo(f.get("unidades")):
+                plan.error(n, "Una recompensa de staking necesita las unidades que recibiste, en positivo.")
+                continue
+            if (decimales(f.get("unidades")) or 0) > 8:
+                if round(unidades, 8) <= 0:
+                    plan.error(n, "La recompensa es de menos de 0,00000001 unidades: Rumbo guarda las unidades "
+                                  "con 8 decimales.")
+                    continue
+                con_mas_decimales += 1
+            tprod = tprod or "cripto"
+        elif not importe and tipo not in ("saldo", "ajuste"):
+            # Un «dividendo» con unidades y sin importe (sin decir que es una cripto) puede ser staking.
+            pista = (" Si es una recompensa de staking de una criptomoneda, pon «staking» en tipo_movimiento "
+                     "(o «cripto» en tipo_producto): suma sus unidades sin necesitar importe."
+                     if tipo == "dividendo" and unidades else "")
+            plan.error(n, "No tiene importe." + pista)
             continue
         if tipo == "ajuste":
             importe = importe or 0.0
@@ -422,7 +484,7 @@ def preparar_tabla(cfg, filas, carpeta):
         ref = res.producto(n, ident, nombre, tprod)
         if not ref:
             continue
-        marcas = []
+        marcas = ["era «dividendo»"] if era_dividendo else []
 
         # Importes en otra moneda: se pasan a euros con el cambio de ese día.
         if moneda != "EUR" and importe is not None:
@@ -467,10 +529,20 @@ def preparar_tabla(cfg, filas, carpeta):
             neto = importe - (comision or 0) if tipo == "compra" else importe + (comision or 0)
             unidades = neto / precio
             marcas.append("unidades calculadas")
+        if tipo == "staking":
+            # Sin importe no se inventa ninguno; con él, es lo que valía (no dinero aportado).
+            importe = round(importe, 6) if importe else None
+            if importe is None:
+                marcas.append("sin valorar")
+        else:
+            importe = round(importe, 2)
         plan.movimientos.append({"fila": n, "producto": ref, "fecha": fecha, "tipo": tipo,
-                                 "unidades": unidades, "importe": round(importe, 2),
+                                 "unidades": unidades, "importe": importe,
                                  "comision": round(comision, 2) if comision else None,
                                  "nota": nota, "marcas": marcas, "origen": "importado"})
+    if con_mas_decimales:
+        plan.avisos.append(f"{con_mas_decimales} recompensas de staking traen más de 8 decimales: se guardan "
+                           "redondeadas a 8, como el resto de unidades.")
     empareja_traspasos(plan, traspasos)
     return plan
 
@@ -738,12 +810,16 @@ def aplicar(cfg, plan, respuestas=None, carpeta_series=None):
     contestados = {it["ref"]: respuesta_valida(it, respuestas.get(it["ref"]), real) for it in plan.traspasos_mi}
 
     def firma(m):
+        if m["tipo"] == "staking":
+            # Una recompensa son unos satoshis: con 4 decimales, dos distintas del mismo día serían la
+            # misma. Y su valoración no cuenta: reimportar el extracto ya valorado no la duplica.
+            return (m["producto"], m["fecha"], "staking", round(float(m.get("unidades") or 0), 8))
         return (m["producto"], m["fecha"], m["tipo"], round(float(m.get("unidades") or 0), 4),
                 round(float(m.get("importe") or 0), 2))
-    existentes = {firma(m) for m in cfg["movimientos"]}
+    existentes = Counter(firma(m) for m in cfg["movimientos"])
 
     añadidos, duplicados, filas = 0, 0, []
-    orden = {"compra": 0, "comision": 1, "dividendo": 2, "venta": 3, "traspaso": 4, "ajuste": 6}
+    orden = {"compra": 0, "comision": 1, "dividendo": 2, "staking": 2, "venta": 3, "traspaso": 4, "ajuste": 6}
     apartados = []   # lotes de traspaso que pasan a ser un traspaso de verdad (si sale bien)
     for mv in sorted(plan.movimientos, key=lambda m: (m["fecha"], orden.get(m["tipo"], 9))):
         if mv.get("_traspaso") and contestados.get(mv["producto"]):
@@ -755,15 +831,19 @@ def aplicar(cfg, plan, respuestas=None, carpeta_series=None):
         if mv.get("destino"):
             datos["destino"] = real(mv["destino"])
         estado = "nuevo"
-        if firma({**datos, "unidades": datos.get("unidades", 0)}) in existentes:
+        clave = firma({**datos, "unidades": datos.get("unidades", 0)})
+        if existentes[clave] > 0:
             duplicados += 1
             estado = "repetido"
+            if mv["tipo"] == "staking":
+                # Varias recompensas iguales el mismo día son legítimas: cada una guardada cubre a una sola.
+                existentes[clave] -= 1
         else:
             try:
                 guardado = almacen.guarda_movimiento(cfg, datos)
                 guardado["origen"] = mv["origen"]
                 if mv["tipo"] == "traspaso":
-                    existentes.add(firma(guardado))
+                    existentes[firma(guardado)] += 1
                 añadidos += 1
             except almacen.ErrorValidacion as e:
                 errores.append({"fila": mv["fila"], "mensaje": " ".join(e.errores)})
@@ -793,7 +873,7 @@ def aplicar(cfg, plan, respuestas=None, carpeta_series=None):
                 estado["hecho"] = True
                 estado["fechas"] = [m["fecha"] for m in movs]
                 for mov in movs:
-                    existentes.add(firma(mov))
+                    existentes[firma(mov)] += 1
                     filas.append({"fila": it["isin"], "fecha": mov["fecha"], "producto": real(it["ref"]),
                                   "tipo": "traspaso", "unidades": mov["unidadesDestino"], "importe": mov["importe"],
                                   "marcas": ["traspaso desde " + (almacen.producto(cfg, resp["origen"]) or {}).get("nombre", "")]
@@ -825,7 +905,7 @@ def aplicar(cfg, plan, respuestas=None, carpeta_series=None):
             errores.append({"fila": v["fila"], "mensaje": " ".join(e.errores)})
 
     def total(t):
-        return round(sum(f["importe"] for f in filas if f["tipo"] == t and f["estado"] == "nuevo"), 2)
+        return round(sum(f["importe"] or 0 for f in filas if f["tipo"] == t and f["estado"] == "nuevo"), 2)
     nombres = {p["id"]: p.get("corto") or p["nombre"] for p in cfg["productos"]}
     for f in filas:
         f["productoNombre"] = nombres.get(f["producto"], f["producto"])
@@ -840,7 +920,11 @@ def aplicar(cfg, plan, respuestas=None, carpeta_series=None):
         "avisos": plan.avisos,
         "totales": {"compras": total("compra"), "ventas": total("venta"),
                     "dividendos": total("dividendo"), "comisiones": total("comision"),
-                    "numCompras": sum(1 for f in filas if f["tipo"] == "compra" and f["estado"] == "nuevo")},
+                    "numCompras": sum(1 for f in filas if f["tipo"] == "compra" and f["estado"] == "nuevo"),
+                    # Las recompensas no son dinero que entre o salga: van aparte, por número.
+                    "numStaking": sum(1 for f in filas if f["tipo"] == "staking" and f["estado"] == "nuevo"),
+                    "stakingSinValorar": sum(1 for f in filas if f["tipo"] == "staking" and f["estado"] == "nuevo"
+                                             and not f["importe"])},
         "productosNuevos": [{**n["datos"], "id": ids.get(n["ref"]), "precio": n["precio"],
                              "monedaPrecio": n["monedaPrecio"], "fechaPrecio": n["fecha"],
                              "mercado": n["mercado"]} for n in plan.productos_nuevos],

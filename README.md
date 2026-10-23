@@ -291,6 +291,22 @@ Si importas el CSV de MyInvestor, Rumbo **detecta los traspasos solo**: en la vi
 
 Si las participaciones de un fondo no coinciden con las de tu banco (pasa con algunos traspasos importados de MyInvestor), **Movimientos → «Cuadrar participaciones»**: escribe las buenas y Rumbo las fija desde esa fecha sin cambiar lo que pagaste.
 
+### Recompensas de staking (criptomonedas)
+
+Lo que te da el staking de una criptomoneda (Bit2Me, Binance, Coinbase…) se anota como **«Recompensa de staking»** en **Movimientos → «+ Añadir movimiento»** (solo aparece en productos de tipo «Criptomoneda»), o de golpe con la plantilla y el tipo `staking`:
+
+```text
+fecha;identificador;nombre;tipo_producto;tipo_movimiento;unidades;importe;moneda;comision;nota
+2026-01-01;B2M;B2M;cripto;staking;1.23456789;;EUR;;Bit2Me staking
+2026-01-05;BTC;BTC;cripto;staking;0.00000037;;EUR;;Bit2Me staking
+```
+
+- **Unidades**: obligatorias, con todos sus decimales (Rumbo guarda hasta 8). Varias recompensas iguales el mismo día se guardan todas, y volver a importar el mismo extracto (o uno más largo) no duplica las que ya estaban.
+- **Importe**: opcional. Si lo pones, es **lo que valía la recompensa ese día**, no dinero que hayas puesto. Si no lo sabes, déjalo vacío: Rumbo no se inventa ninguno.
+- Si una IA te las devuelve como `dividendo` sin importe en una `cripto`, Rumbo las importa igualmente como staking (un dividendo sin importe no tendría sentido) y en la vista previa las marca con «era dividendo».
+
+Las recompensas suman unidades y se valoran con el precio de cada día, pero **no son compras ni dividendos**: no cuentan como dinero aportado ni como cobros, así que lo que valen sale una sola vez: en tu plusvalía (y en la TIR, como más valor con el mismo dinero). En la ficha del producto verás cuántas has recibido y lo que vale hoy lo que conservas de ellas, aparte de la revalorización. Al vender, el FIFO las gasta después de lo que compraste antes. En **Para la Renta**, su valor de adquisición es lo que valían al recibirlas: si no lo anotaste, Rumbo lo avisa en cada venta afectada en lugar de darlo por cero.
+
 ### Cuentas, planes de pensiones, pisos… (valores anotados a mano)
 
 ![Saldos y valores](docs/capturas/07_saldos.png)
@@ -345,9 +361,9 @@ Descarga la plantilla desde la app (**Excel** o **CSV**). Trae desplegables, una
 | `identificador` | Casi siempre | ISIN o ticker. Vacío solo en cuentas y cosas sin precio en internet. |
 | `nombre` | Si no hay identificador | Nombre del producto o de la cuenta. |
 | `tipo_producto` | No | `fondo`, `etf`, `accion`, `cripto`, `commodity`, `bono`, `pension`, `efectivo`, `inmueble`, `deuda`, `p2p` u `otro`. |
-| `tipo_movimiento` | Sí | `compra`, `venta`, `dividendo`, `comision` o `saldo` (el saldo de una cuenta en esa fecha). |
-| `unidades` | Recomendado | Si lo dejas vacío, se calculan con el precio de ese día. |
-| `importe` | Sí | Dinero total. Compra: lo que salió de tu cuenta, con comisiones. Venta o dividendo: lo que entró. |
+| `tipo_movimiento` | Sí | `compra`, `venta`, `dividendo`, `comision`, `saldo` (el saldo de una cuenta en esa fecha) o `staking` (una recompensa de staking de una criptomoneda). |
+| `unidades` | Recomendado | Si lo dejas vacío, se calculan con el precio de ese día. En `staking`, obligatorio y con todos sus decimales (hasta 8). |
+| `importe` | Sí (no en `staking`) | Dinero total. Compra: lo que salió de tu cuenta, con comisiones. Venta o dividendo: lo que entró. En `staking`, opcional: lo que valía la recompensa ese día. |
 | `moneda` | No | Moneda del importe. Si no es EUR, se convierte con el cambio de ese día. |
 | `comision` | No | Comisión de la operación, ya incluida en el importe. |
 | `nota` | No | Lo que quieras. |
@@ -377,9 +393,9 @@ Reglas para cada columna:
 - identificador: el ISIN si aparece (12 caracteres, como IE00BYX5NX33); si no, el ticker (como AAPL). Para cuentas bancarias, déjalo vacío.
 - nombre: el nombre del producto o de la cuenta, tal y como aparece.
 - tipo_producto: una de estas palabras: fondo, etf, accion, cripto, commodity, bono, pension, efectivo, inmueble, deuda, p2p, otro.
-- tipo_movimiento: una de estas palabras: compra, venta, dividendo, comision, saldo. Usa «saldo» solo para el saldo de una cuenta en una fecha.
-- unidades: participaciones, acciones o unidades compradas o vendidas, en positivo y con punto decimal. Déjalo vacío si no aparece.
-- importe: el dinero total de la operación, en positivo, con punto decimal y sin símbolo de moneda. En una compra, lo que salió de la cuenta con las comisiones incluidas; en una venta o un dividendo, lo que entró.
+- tipo_movimiento: una de estas palabras: compra, venta, dividendo, comision, saldo, traspaso_salida, traspaso_entrada, staking. Usa «saldo» solo para el saldo de una cuenta en una fecha. Un traspaso de un fondo (o plan de pensiones) a otro son DOS filas con la misma fecha y el mismo importe: traspaso_salida en el fondo de origen y traspaso_entrada en el de destino. No lo anotes como venta y compra. Usa «staking» para cada recompensa de staking de una criptomoneda (unidades que recibes sin pagar): no la anotes como compra ni como dividendo.
+- unidades: participaciones, acciones o unidades compradas o vendidas, en positivo y con punto decimal. Déjalo vacío si no aparece. En una recompensa de staking es obligatorio: copia todos sus decimales tal cual (por ejemplo 0.00000037), sin redondear.
+- importe: el dinero total de la operación, en positivo, con punto decimal y sin símbolo de moneda. En una compra, lo que salió de la cuenta con las comisiones incluidas; en una venta o un dividendo, lo que entró. En una recompensa de staking, lo que valía solo si el extracto lo dice; si no, déjalo vacío.
 - moneda: la moneda del importe (EUR, USD…).
 - comision: la comisión de esa operación si aparece (ya va incluida en el importe). Si no, vacío.
 - nota: vacío, o una nota muy breve.
