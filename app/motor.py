@@ -103,10 +103,21 @@ def r4(x):
 
 # ---------------------------------------------------------------- Yahoo
 
+def _base_cache(simbolo, cache=None):
+    """Ruta en la cache, sin extensión, de los ficheros de un símbolo de Yahoo."""
+    return os.path.join(cache or CACHE, re.sub(r"[^A-Za-z0-9._-]", "_", simbolo))
+
+
+def splits_de(simbolo, cache=None):
+    """{fecha_iso: proporción} de los splits que Yahoo ha dado para el símbolo (25.0 = 25 por 1)."""
+    return lee_cache(_base_cache(simbolo, cache) + ".splits.json")
+
+
 def descargar_serie(simbolo, anos=None):
     """Devuelve {fecha_iso: cierre} descargando de Yahoo, con cache en disco."""
     os.makedirs(CACHE, exist_ok=True)
-    ruta = os.path.join(CACHE, re.sub(r"[^A-Za-z0-9._-]", "_", simbolo) + ".json")
+    ruta = _base_cache(simbolo) + ".json"
+    ruta_splits = _base_cache(simbolo) + ".splits.json"
     previo = lee_cache(ruta)
     if SIN_RED or (SOLO_FALTAN and previo):
         return previo
@@ -115,7 +126,8 @@ def descargar_serie(simbolo, anos=None):
     # o al trimestre aunque se le pida interval=1d.
     desde = int(time.time()) - anos * 365 * 86400 if anos else 0
     url = ("https://query1.finance.yahoo.com/v8/finance/chart/"
-           f"{urllib.parse.quote(simbolo)}?period1={desde}&period2={int(time.time())}&interval=1d")
+           f"{urllib.parse.quote(simbolo)}?period1={desde}&period2={int(time.time())}"
+           "&interval=1d&events=split")
     try:
         with red.abrir(url, UA, timeout=30) as resp:
             bruto = json.loads(resp.read().decode("utf-8", "replace"))
@@ -129,13 +141,27 @@ def descargar_serie(simbolo, anos=None):
         for ts, c in zip(res.get("timestamp", []), cierres):
             if c is not None:
                 nuevo[dt.date.fromtimestamp(ts).isoformat()] = float(c)
+        # Yahoo da los cierres ya ajustados por splits, también los anteriores al split.
+        splits = {}
+        for sp in ((res.get("events") or {}).get("splits") or {}).values():
+            try:
+                if sp["denominator"] and sp["numerator"]:
+                    splits[dt.date.fromtimestamp(sp["date"]).isoformat()] = sp["numerator"] / sp["denominator"]
+            except (KeyError, TypeError):
+                pass
         if nuevo:
+            conocidos = lee_cache(ruta_splits)
+            if set(splits) - set(conocidos):
+                # Un split nuevo reajusta toda la serie: lo guardado antes está sin ajustar.
+                previo = {}
             # Lo descargado sustituye a lo guardado en ese tramo de fechas: así se limpian
             # los datos mensuales que dejó en la cache la versión 1.1.0.
             previo = {k: v for k, v in previo.items() if k < min(nuevo)}
             previo.update(nuevo)
             with open(ruta, "w", encoding="utf-8") as f:
                 json.dump(previo, f)
+            # Se suman a los ya conocidos: una descarga de pocos años no trae los splits antiguos.
+            guarda_cache(ruta_splits, {**conocidos, **splits})
             print(f"  OK  {simbolo:16s} {len(nuevo):5d} sesiones  "
                   f"ultimo {sorted(nuevo)[-1]} = {nuevo[sorted(nuevo)[-1]]:.4f}")
         else:

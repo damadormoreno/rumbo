@@ -19,10 +19,19 @@ class RespuestaFalsa(io.BytesIO):
         return False
 
 
-def yahoo(fechas_cierres, granularidad="1d"):
-    ts = [int(time.mktime(time.strptime(f, "%Y-%m-%d"))) + 12 * 3600 for f, _ in fechas_cierres]
-    cuerpo = {"chart": {"result": [{"meta": {"dataGranularity": granularidad}, "timestamp": ts,
-                                    "indicators": {"quote": [{"close": [c for _, c in fechas_cierres]}]}}]}}
+def _ts(fecha):
+    return int(time.mktime(time.strptime(fecha, "%Y-%m-%d"))) + 12 * 3600
+
+
+def yahoo(fechas_cierres, granularidad="1d", splits=None):
+    """splits: [(fecha, numerador, denominador)], como los manda Yahoo con events=split."""
+    ts = [_ts(f) for f, _ in fechas_cierres]
+    res = {"meta": {"dataGranularity": granularidad}, "timestamp": ts,
+           "indicators": {"quote": [{"close": [c for _, c in fechas_cierres]}]}}
+    if splits:
+        res["events"] = {"splits": {str(_ts(f)): {"date": _ts(f), "numerator": n, "denominator": d,
+                                                  "splitRatio": f"{n}:{d}"} for f, n, d in splits}}
+    cuerpo = {"chart": {"result": [res]}}
     return RespuestaFalsa(json.dumps(cuerpo).encode())
 
 
@@ -58,6 +67,57 @@ class DescargaYahoo(ConCarpeta):
             json.dump({"1999-01-04": 1.0, "2025-02-01": 999.0}, f)   # 2025-02-01 es sábado: dato mensual
         serie = self.descarga(yahoo([("2025-01-02", 10.0), ("2025-02-03", 11.0)]))
         self.assertEqual(serie, {"1999-01-04": 1.0, "2025-01-02": 10.0, "2025-02-03": 11.0})
+
+    def test_pide_los_splits(self):
+        self.descarga(yahoo([("2025-01-02", 10.0)]))
+        self.assertIn("events=split", self.urls[0])
+
+    def test_guarda_los_splits_aparte(self):
+        self.descarga(yahoo([("2026-02-27", 3.3), ("2026-03-02", 3.4)],
+                            splits=[("2026-03-02", 25, 1)]), simbolo="SPYI.DE")
+        self.assertTrue(os.path.exists(os.path.join(motor.CACHE, "SPYI.DE.splits.json")))
+        self.assertEqual(motor.splits_de("SPYI.DE"), {"2026-03-02": 25.0})
+        self.assertEqual(motor.splits_de("SPYI.DE", cache=motor.CACHE), {"2026-03-02": 25.0})
+
+    def test_sin_fichero_de_splits_no_hay_splits(self):
+        self.assertEqual(motor.splits_de("AAPL"), {})
+        os.makedirs(motor.CACHE)
+        with open(os.path.join(motor.CACHE, "AAPL.splits.json"), "w") as f:
+            f.write("{roto")
+        self.assertEqual(motor.splits_de("AAPL"), {})
+
+    def test_ignora_splits_mal_formados(self):
+        self.descarga(yahoo([("2025-01-02", 10.0)], splits=[("2024-06-10", 10, 0)]))
+        self.assertEqual(motor.splits_de("AAPL"), {})
+
+    def test_un_split_nuevo_tira_la_cache_vieja(self):
+        # Caso real SPYI.DE: Yahoo reajusta toda la serie tras el split y la cola vieja
+        # (sin ajustar) saltaba de 83,06 a 3,32 el 2015-01-02.
+        os.makedirs(motor.CACHE)
+        with open(os.path.join(motor.CACHE, "SPYI.DE.json"), "w") as f:
+            json.dump({"2014-12-30": 83.06, "2015-01-02": 83.5}, f)
+        serie = self.descarga(yahoo([("2015-01-02", 3.32), ("2026-03-02", 3.4)],
+                                    splits=[("2026-03-02", 25, 1)]), simbolo="SPYI.DE")
+        self.assertEqual(serie, {"2015-01-02": 3.32, "2026-03-02": 3.4})
+        with open(os.path.join(motor.CACHE, "SPYI.DE.json")) as f:
+            self.assertNotIn("2014-12-30", json.load(f))
+
+    def test_un_split_ya_conocido_mantiene_la_cache(self):
+        os.makedirs(motor.CACHE)
+        with open(os.path.join(motor.CACHE, "SPYI.DE.json"), "w") as f:
+            json.dump({"2014-12-30": 3.30, "2015-01-02": 3.32}, f)
+        with open(os.path.join(motor.CACHE, "SPYI.DE.splits.json"), "w") as f:
+            json.dump({"2026-03-02": 25.0}, f)
+        serie = self.descarga(yahoo([("2015-01-02", 3.32), ("2026-03-02", 3.4)],
+                                    splits=[("2026-03-02", 25, 1)]), simbolo="SPYI.DE")
+        self.assertEqual(serie, {"2014-12-30": 3.30, "2015-01-02": 3.32, "2026-03-02": 3.4})
+
+    def test_una_descarga_corta_no_olvida_splits_antiguos(self):
+        os.makedirs(motor.CACHE)
+        with open(os.path.join(motor.CACHE, "SPYI.DE.splits.json"), "w") as f:
+            json.dump({"2015-06-01": 2.0}, f)
+        self.descarga(yahoo([("2026-03-02", 3.4)], splits=[("2026-03-02", 25, 1)]), simbolo="SPYI.DE")
+        self.assertEqual(motor.splits_de("SPYI.DE"), {"2015-06-01": 2.0, "2026-03-02": 25.0})
 
     def test_sin_conexion_usa_la_cache(self):
         os.makedirs(motor.CACHE)

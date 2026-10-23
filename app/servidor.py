@@ -37,7 +37,8 @@ PUERTO = int(os.environ.get("PATRIMONIO_PUERTO") or 8765)
 HORAS_PRECIOS = 6          # al arrancar, se actualizan si tienen más de esto
 # Sube cuando cambia cómo se guardan los precios: obliga a descargarlos de nuevo al arrancar.
 # 2: la v1.1.2 deja de guardar los precios mensuales que daba Yahoo con range=max.
-VERSION_CACHE = 2
+# 3: se guardan los splits de Yahoo y se tira la cola sin ajustar que quedaba tras un split.
+VERSION_CACHE = 3
 
 app = Flask(__name__, static_folder=None)
 app.json.sort_keys = False   # respeta el orden de tipos y listas al mandarlos al navegador
