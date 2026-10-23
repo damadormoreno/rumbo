@@ -1,4 +1,5 @@
 """Internet simulado: descargas de Yahoo, reintentos y mensajes cuando falla la conexión."""
+import contextlib
 import io
 import json
 import os
@@ -111,6 +112,34 @@ class DescargaYahoo(ConCarpeta):
         serie = self.descarga(yahoo([("2015-01-02", 3.32), ("2026-03-02", 3.4)],
                                     splits=[("2026-03-02", 25, 1)]), simbolo="SPYI.DE")
         self.assertEqual(serie, {"2014-12-30": 3.30, "2015-01-02": 3.32, "2026-03-02": 3.4})
+
+    def guarda_cache(self, simbolo, serie):
+        os.makedirs(motor.CACHE, exist_ok=True)
+        with open(os.path.join(motor.CACHE, simbolo + ".json"), "w") as f:
+            json.dump(serie, f)
+
+    def test_fechas_comunes_que_no_cuadran_tiran_la_cache_vieja(self):
+        # Yahoo reajusta el histórico sin avisar del split: las fechas que ya estaban
+        # guardadas vuelven 25 veces más bajas, y lo anterior también está sin ajustar.
+        self.guarda_cache("SPYI.DE", {"2014-12-30": 83.06, "2025-06-02": 250.0, "2025-06-03": 252.5})
+        salida = io.StringIO()
+        with contextlib.redirect_stdout(salida):
+            serie = self.descarga(yahoo([("2025-06-02", 10.0), ("2025-06-03", 10.1)]), simbolo="SPYI.DE")
+        self.assertEqual(serie, {"2025-06-02": 10.0, "2025-06-03": 10.1})
+        self.assertIn("reajustado", salida.getvalue())
+
+    def test_salto_de_split_en_la_union_tira_la_cache_vieja(self):
+        # Caso real SPYI.DE: Yahoo no devuelve el evento del split (25:1) pero sí los
+        # cierres ajustados; la descarga empieza el 2015-01-02 y la cola guardada no.
+        self.guarda_cache("SPYI.DE", {"2014-12-29": 82.9, "2014-12-30": 83.06})
+        serie = self.descarga(yahoo([("2015-01-02", 3.3172), ("2015-01-05", 3.30)]), simbolo="SPYI.DE")
+        self.assertEqual(serie, {"2015-01-02": 3.3172, "2015-01-05": 3.30})
+
+    def test_fechas_comunes_que_cuadran_mantienen_la_cache(self):
+        self.guarda_cache("AAPL", {"2024-12-30": 9.9, "2025-01-02": 10.0, "2025-01-03": 10.2})
+        serie = self.descarga(yahoo([("2025-01-02", 10.05), ("2025-01-03", 10.15), ("2025-01-06", 10.3)]))
+        self.assertEqual(serie, {"2024-12-30": 9.9, "2025-01-02": 10.05, "2025-01-03": 10.15,
+                                 "2025-01-06": 10.3})
 
     def test_una_descarga_corta_no_olvida_splits_antiguos(self):
         os.makedirs(motor.CACHE)

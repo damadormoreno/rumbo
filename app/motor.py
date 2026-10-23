@@ -114,6 +114,39 @@ def splits_de(simbolo, cache=None):
     return lee_cache(_base_cache(simbolo, cache) + ".splits.json")
 
 
+def _cache_reajustada(previo, nuevo, splits_nuevos):
+    """
+    True si Yahoo ha reajustado el histórico y todo lo guardado antes ya no vale.
+    Yahoo no siempre manda el evento del split (SPYI.DE no lo trae), pero sí da
+    los cierres de antes ajustados; por eso se mira también si los precios cuadran.
+    """
+    # 1. Un split que no se conocía: Yahoo ha reajustado la serie entera.
+    if splits_nuevos:
+        return True
+    # 2. Fechas guardadas y descargadas a la vez: si la mediana del cociente se va
+    #    más de un 5 % de 1, lo guardado está en otra escala.
+    cocientes = sorted(nuevo[k] / previo[k] for k in set(previo) & set(nuevo)
+                       if previo[k] > 0 and nuevo[k] > 0)
+    if cocientes:
+        n = len(cocientes)
+        mediana = cocientes[n // 2] if n % 2 else (cocientes[n // 2 - 1] + cocientes[n // 2]) / 2
+        if not 1 / 1.05 <= mediana <= 1.05:
+            return True
+    # 3. Unión entre el último cierre guardado anterior a la descarga y el primero
+    #    nuevo: si están a pocos días y saltan como un split (x1,8 o más, en cualquier
+    #    sentido), lo guardado está sin ajustar. Con huecos largos no se compara:
+    #    en años el precio puede haber cambiado mucho sin ningún split.
+    primera = min(nuevo)
+    anteriores = [k for k, v in previo.items() if k < primera and v > 0]
+    if anteriores and nuevo[primera] > 0:
+        ultima = max(anteriores)
+        dias = (dt.date.fromisoformat(primera) - dt.date.fromisoformat(ultima)).days
+        salto = nuevo[primera] / previo[ultima]
+        if dias <= 10 and not 1 / 1.8 < salto < 1.8:
+            return True
+    return False
+
+
 def descargar_serie(simbolo, anos=None):
     """Devuelve {fecha_iso: cierre} descargando de Yahoo, con cache en disco."""
     os.makedirs(CACHE, exist_ok=True)
@@ -152,8 +185,9 @@ def descargar_serie(simbolo, anos=None):
                 pass
         if nuevo:
             conocidos = lee_cache(ruta_splits)
-            if set(splits) - set(conocidos):
-                # Un split nuevo reajusta toda la serie: lo guardado antes está sin ajustar.
+            if previo and _cache_reajustada(previo, nuevo, set(splits) - set(conocidos)):
+                # Un split reajusta toda la serie: lo guardado antes está sin ajustar.
+                print(f"  ..  {simbolo}: Yahoo ha reajustado el histórico (¿split?); descarto lo guardado")
                 previo = {}
             # Lo descargado sustituye a lo guardado en ese tramo de fechas: así se limpian
             # los datos mensuales que dejó en la cache la versión 1.1.0.
