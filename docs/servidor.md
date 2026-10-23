@@ -27,7 +27,7 @@ este fork y guarda los datos en la carpeta `mis_datos` junto al código.
 ## 2. Arrancar Rumbo en el servidor
 
 ```bash
-git clone -b deploy/servidor https://github.com/damadormoreno/rumbo.git ~/rumbo
+git clone -b develop https://github.com/damadormoreno/rumbo.git ~/rumbo
 cd ~/rumbo
 tar -xzf ~/mis_datos.tgz            # crea ~/rumbo/mis_datos
 sudo chown -R 1000:1000 mis_datos   # Rumbo corre como el usuario 1000 dentro del contenedor
