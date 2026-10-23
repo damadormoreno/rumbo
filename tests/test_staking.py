@@ -337,6 +337,30 @@ class Importar(ConCarpeta):
         self.assertEqual(inf["errores"], [])
         self.assertEqual((cfg["productos"][0]["tipo"], cfg["productos"][0]["codigo"]), ("cripto", "SOL-EUR"))
 
+    def test_cripto_que_solo_aparece_como_fondo_no_se_crea(self):
+        # «EURR» (una moneda estable) también es el nombre de unos fondos: no es esa cripto.
+        cands = [{"fuente": "morningstar", "codigo": "F0000X", "nombre": "Un fondo", "tipo": "fondo", "moneda": "EUR"}]
+        cfg = cartera()
+        with mock.patch.object(importar.buscar, "buscar", lambda q: cands):
+            inf = importa(cfg, ["2026-01-05;EURR;EURR;cripto;staking;0,02;;;;"], self.carpeta)
+        self.assertEqual((inf["añadidos"], inf["productosNuevos"], cfg["productos"]), (0, [], []))
+        self.assertIn("como criptomoneda", inf["errores"][0]["mensaje"])
+
+    def test_cada_fila_de_un_producto_no_encontrado_sale_en_los_errores(self):
+        cfg = cartera()
+        with mock.patch.object(importar.buscar, "buscar", lambda q: []):
+            inf = importa(cfg, ["2026-01-05;SOL2;SOL2;cripto;staking;0,00002281;;;;",
+                                "2026-01-12;SOL2;SOL2;cripto;staking;0,00002281;;;;"], self.carpeta)
+        self.assertEqual([e["fila"] for e in inf["errores"]], [2, 3])
+        self.assertEqual(inf["errores"][0]["mensaje"], inf["errores"][1]["mensaje"])
+
+    def test_staking_etiquetado_como_dividendo_da_una_pista(self):
+        # Así lo devolvió una IA con un extracto de Bit2Me: «dividendo», sin importe y «Staking» en la nota.
+        inf = importa(self.cfg, ["2026-01-05;BTC;BTC;cripto;dividendo;0.00000037;;;0;Staking"], self.carpeta)
+        self.assertIn("pon «staking» en tipo_movimiento", inf["errores"][0]["mensaje"])
+        inf = importa(self.cfg, ["2026-01-05;BTC;BTC;cripto;compra;0.00000037;;;;"], self.carpeta)
+        self.assertEqual(inf["errores"][0]["mensaje"], "No tiene importe.")
+
     def test_compras_sin_importe_siguen_dando_error(self):
         inf = importa(self.cfg, ["2026-01-05;BTC;BTC;cripto;compra;0,5;;;;"], self.carpeta)
         self.assertEqual(inf["errores"][0]["mensaje"], "No tiene importe.")
@@ -365,6 +389,23 @@ class Importar(ConCarpeta):
         self.assertTrue(any(f[4] == "staking" and f[6] is None for f in plantilla.EJEMPLO))
         with open(importar.__file__.replace("importar.py", "prompt_ia.txt"), encoding="utf-8") as f:
             self.assertIn("staking", f.read())
+
+
+class Buscar(unittest.TestCase):
+    def test_cripto_que_yahoo_solo_tiene_en_dolares_sale_de_coingecko(self):
+        # Yahoo conoce B2M-USD pero no B2M-EUR: antes no se miraba CoinGecko y la moneda «no existía».
+        yahoo = [{"symbol": "0P0001X.F", "quoteType": "MUTUALFUND", "longname": "Un fondo"},
+                 {"symbol": "B2M-USD", "quoteType": "CRYPTOCURRENCY", "shortname": "Bit2Me USD"}]
+        monedas = [{"id": "bit2me", "symbol": "b2m", "name": "Bit2Me", "market_cap_rank": 1062}]
+        precios = {("coingecko", "bit2me"): {"precio": 0.004, "moneda": "EUR", "fecha": "2026-10-23", "mercado": "CoinGecko"},
+                   ("yahoo", "0P0001X.F"): {"precio": 10.0, "moneda": "EUR", "fecha": "2026-10-23"}}
+        with mock.patch.object(importar.buscar, "yahoo_buscar", lambda q, n=8: yahoo), \
+                mock.patch.object(importar.buscar, "cg_buscar", lambda q: monedas), \
+                mock.patch.object(importar.buscar, "probar", lambda f, c: precios.get((f, c))):
+            res = importar.buscar.buscar("B2M")
+        cripto = [r for r in res if r["tipo"] == "cripto"]
+        self.assertEqual([(r["fuente"], r["codigo"], r["identificador"]) for r in cripto], [("coingecko", "bit2me", "B2M")])
+        self.assertEqual(cripto[0]["precio"], 0.004)
 
 
 if __name__ == "__main__":

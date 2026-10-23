@@ -345,27 +345,34 @@ class Resolutor:
     def __init__(self, cfg, plan, carpeta):
         self.cfg, self.plan, self.carpeta = cfg, plan, carpeta
         self.cache, self.series, self.frescas = {}, {}, set()
+        self.fallos = {}   # por qué no se encontró un producto, para repetirlo en cada fila suya
 
     def producto(self, fila, identificador, nombre, tipo_prod):
         clave = ((identificador or "").strip().upper(), sin_tildes(nombre) if not identificador else "")
         if clave in self.cache:
+            if clave in self.fallos:
+                # Cada fila que no se importa sale en la lista, no solo la primera de ese producto.
+                self.plan.error(fila, self.fallos[clave])
             return self.cache[clave]
-        ref = None
+        ref, n_errores = None, len(self.plan.errores)
         existente = _producto_existente(self.cfg, identificador, nombre)
         if existente:
             ref = existente["id"]
         elif identificador:
             n_fallos = len(buscar.FALLOS)
             res = buscar.buscar(identificador)
+            # Si la fila dice el tipo de producto, el candidato de ese tipo («BTC» es también un ETF). Una
+            # cripto que solo aparece como fondo o acción («EURR» es también un fondo) no es esa cripto.
+            r = next((x for x in res if x.get("tipo") == tipo_prod), res[0]) if res else None
+            if r and tipo_prod == "cripto" and r["tipo"] != "cripto":
+                r = None
             if not res and buscar.hubo_fallos_desde(n_fallos):
                 self.plan.error(fila, f"No he podido consultar «{identificador}» en internet ahora mismo "
                                       "(la conexión ha fallado o Yahoo/Morningstar no han respondido). "
                                       "Comprueba tu conexión y vuelve a pulsar «Previsualizar»: suele bastar "
                                       "con intentarlo otra vez.")
                 ref = None
-            elif res:
-                # Si la fila dice el tipo de producto, el candidato de ese tipo («BTC» es también un ETF).
-                r = next((x for x in res if x.get("tipo") == tipo_prod), res[0])
+            elif r:
                 fi = r.get("ficha") or {}
                 datos = {"nombre": nombre or r.get("nombre") or r["codigo"], "tipo": r["tipo"],
                          "identificador": identificador.strip(), "fuente": r["fuente"], "codigo": r["codigo"],
@@ -373,6 +380,11 @@ class Resolutor:
                          "ter": fi.get("ter"), "riesgo": fi.get("riesgo"), "clase": fi.get("clase") or "",
                          "gestora": fi.get("gestora") or "", "largoPlazo": True}
                 ref = self._nuevo(datos, r)
+            elif res:
+                self.plan.error(fila, f"No encuentro «{identificador}» como criptomoneda con precio en internet "
+                                      "(solo productos de otro tipo con ese nombre). Si no cotiza, créalo en Productos "
+                                      "como «Criptomoneda» con «Valor anotado a mano» y ese mismo identificador, "
+                                      "y vuelve a importar.")
             else:
                 self.plan.error(fila, f"No encuentro «{identificador}» con precio en internet. Si no cotiza, "
                                       "créalo en Productos con «Valor anotado a mano» y ese mismo "
@@ -383,6 +395,8 @@ class Resolutor:
                                "largoPlazo": tipo not in ("efectivo", "deuda")}, None)
         else:
             self.plan.error(fila, "No tiene identificador ni nombre: no sé de qué producto es.")
+        if ref is None and len(self.plan.errores) > n_errores:
+            self.fallos[clave] = self.plan.errores[-1]["mensaje"]
         self.cache[clave] = ref
         return ref
 
@@ -449,7 +463,10 @@ def preparar_tabla(cfg, filas, carpeta):
                 con_mas_decimales += 1
             tprod = tprod or "cripto"
         elif not importe and tipo not in ("saldo", "ajuste"):
-            plan.error(n, "No tiene importe.")
+            # Un «dividendo» con unidades y sin importe en una cripto suele ser staking mal etiquetado.
+            pista = (" Si es una recompensa de staking, pon «staking» en tipo_movimiento: suma sus unidades "
+                     "sin necesitar importe." if tipo == "dividendo" and unidades and tprod == "cripto" else "")
+            plan.error(n, "No tiene importe." + pista)
             continue
         if tipo == "ajuste":
             importe = importe or 0.0

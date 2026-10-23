@@ -265,6 +265,16 @@ def buscar(texto):
         c.update({k: v for k, v in p.items() if v is not None and (k != "nombre" or not c["nombre"])})
         c["mercado"] = c.pop("bolsa") or c.get("mercado")
         salida.append(c)
+    # Yahoo conoce algunas monedas solo en dólares (B2M-USD, pero no B2M-EUR): entonces, el precio
+    # en euros de CoinGecko, que ya era su fuente para el precio en vivo.
+    for c, p in zip(cands, precios):
+        if p or c["fuente"] != "yahoo" or c["tipo"] != "cripto" or not c.get("vivo"):
+            continue
+        p = probar("coingecko", c["vivo"])
+        if p:
+            c.update(fuente="coingecko", codigo=c["vivo"], **{k: v for k, v in p.items() if v is not None and k != "nombre"})
+            c["mercado"] = c.pop("bolsa") or c.get("mercado")
+            salida.append(c)
     # Arriba: los fondos de Morningstar, luego el ticker exacto que has escrito y
     # luego lo que cotiza en euros.
     exacto = q.upper()
