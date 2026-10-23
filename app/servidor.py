@@ -607,7 +607,8 @@ def api_unidades():
     cfg = cartera()
     if not almacen.producto(cfg, pid):
         return jsonify(ok=False, errores=["Ese producto ya no existe."]), 404
-    return jsonify(ok=True, unidades=round(almacen.unidades_a(cfg, pid, fecha, excluir=request.args.get("excluir")), 8))
+    return jsonify(ok=True, unidades=round(almacen.unidades_a(cfg, pid, fecha, excluir=request.args.get("excluir"),
+                                                              cache=os.path.join(DATOS, "cache")), 8))
 
 
 def _serie_de(cfg, datos):
@@ -653,7 +654,7 @@ def api_fiscal():
     if ano is not None and not re.fullmatch(r"\d{4}", ano):
         return jsonify(ok=False, errores=["Año no válido."]), 400
     with cerrojo:   # usa el motor, que no admite dos cálculos a la vez
-        inf = fiscal.informe(cartera(), ano)
+        inf = fiscal.informe(cartera(), ano, cache=os.path.join(DATOS, "cache"))
     return jsonify(ok=True, csv=fiscal.csv_texto(inf), **inf)
 
 
