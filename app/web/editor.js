@@ -460,6 +460,17 @@
           <td class="acc"><button data-acc="editarMov" data-id="${esc(m.id)}">Editar</button>
             <button data-acc="borrarMov" data-id="${esc(m.id)}">Borrar</button></td></tr>`;
       }
+      if (m.tipo === "staking") {
+        // No es dinero que entre ni salga: el importe, si lo hay, es lo que valía al recibirla.
+        const valorada = m.importe > 0;
+        return `<tr><td>${fecha(m.fecha)}</td><td style="text-align:left">${p ? `<i class="pt" style="background:var(--s${p.slot || 1})"></i>` : ""}${esc(nombre(p))}</td>
+          <td style="text-align:left"><span class="etqImp">Staking</span></td><td>+${num(m.unidades, 8)}</td>
+          <td${valorada ? ' title="Lo que valía al recibirla: no es dinero que pusieras"' : ""}>${valorada ? eur(m.importe) : '<span class="subt">sin valorar</span>'}</td>
+          <td>${valorada ? num(m.importe / m.unidades) + " €" : "—"}</td>
+          <td class="nota" title="${esc(m.nota)}">${esc(m.nota || "")}</td>
+          <td class="acc"><button data-acc="editarMov" data-id="${esc(m.id)}">Editar</button>
+            <button data-acc="borrarMov" data-id="${esc(m.id)}">Borrar</button></td></tr>`;
+      }
       if (m.tipo === "traspaso") {
         const d = prod(m.destino);
         return `<tr><td>${fecha(m.fecha)}</td><td style="text-align:left">${p ? `<i class="pt" style="background:var(--s${p.slot || 1})"></i>` : ""}${esc(nombre(p))}
@@ -502,7 +513,11 @@
     venta: "Lo que te ingresaron, ya descontadas las comisiones.",
     dividendo: "Lo que te ingresaron por el dividendo o el cupón.",
     comision: "Comisiones sueltas, como la de custodia. Las de compra y venta ya van dentro de su importe.",
+    staking: "Las unidades que te ha dado el staking, con todos sus decimales. El valor es opcional: lo que valía ese día " +
+      "(no es dinero que pongas). Si no lo sabes, déjalo vacío.",
   };
+  // Unidades con todos sus decimales y sin notación científica (0,00000037, no 3,7e-7).
+  const textoUnidades = v => v == null || v === "" ? "" : Number(v).toLocaleString("es-ES", { maximumFractionDigits: 8, useGrouping: false });
   const AYUDA_INMUEBLE = {
     dividendo: "Lo que te ha pagado el inquilino. Puedes anotarlo cada mes o sumado por año. No cambia el valor del " +
       "inmueble (ese lo anotas en «Saldos y valores»): sirve para ver lo que te rinde.",
@@ -535,7 +550,7 @@
     if (m && m.tipo === "traspaso") return formTraspaso(m);
     if (m && m.tipo === "ajuste") return formAjuste(m);
     const pildoras = Object.entries(E.tiposMov).filter(([k]) => k !== "traspaso" && k !== "ajuste").map(([k, v]) =>
-      `<label><input type="radio" name="tipo" value="${esc(k)}"><span>${esc(k === "dividendo" ? "Dividendo" : v)}</span></label>`).join("");
+      `<label><input type="radio" name="tipo" value="${esc(k)}"><span>${esc(k === "dividendo" ? "Dividendo" : k === "staking" ? "Staking" : v)}</span></label>`).join("");
     const f = abreModal(nuevo ? "Añadir movimiento" : "Editar movimiento", `
       <div class="pildoras">${pildoras}</div>
       <div class="rejilla" style="margin-top:18px">
@@ -544,7 +559,7 @@
         ${campo("Fecha", `<input type="date" name="fecha" max="${hoy()}">`)}
         ${campo("Unidades", `<div class="conBoton"><input name="unidades" inputmode="decimal" placeholder="0">
           <button type="button" class="btn" id="mTodas" title="Rellena las unidades exactas que tenías ese día">Todas</button></div>`, "participaciones, acciones…", "siUnid")}
-        ${campo("Importe total", `<div class="conSufijo conMoneda"><input name="importe" inputmode="decimal" placeholder="0,00">
+        ${campo('<span id="mEtImporte">Importe total</span>', `<div class="conSufijo conMoneda"><input name="importe" inputmode="decimal" placeholder="0,00">
           <select name="moneda" aria-label="Moneda del importe" title="¿Pagaste en otra moneda? Elígela y se pasa a euros con el cambio de ese día"></select></div>`)}
         ${campo("Comisión", '<div class="conSufijo"><input name="comision" inputmode="decimal" placeholder="0,00"><span id="mSufCom">€</span></div>', "ya incluida en el importe", "siCom")}
         ${campo("Nota", '<input name="nota" maxlength="200" placeholder="Por ejemplo: aportación mensual">', "opcional", "ancho")}
@@ -558,7 +573,7 @@
       recuerda.guarda("patrimonio.editor", "movimientos");
       return null;
     }, nuevo ? "Guardar movimiento" : "Guardar cambios");
-    rellena(f, { ...m, unidades: decimal(m.unidades || ""), importe: decimal(m.importe), comision: decimal(m.comision) });
+    rellena(f, { ...m, unidades: textoUnidades(m.unidades || ""), importe: decimal(m.importe), comision: decimal(m.comision) });
     const selMoneda = f.elements.moneda;
     const ponMonedas = () => {
       const antes = selMoneda.value || "EUR";
@@ -573,20 +588,24 @@
       // Una cuenta solo admite intereses: el resto de pestañas desaparecen.
       const cuenta = !!(p && p.tipo === "efectivo");
       const piso = !!(p && p.tipo === "inmueble");
+      // El staking solo existe en criptomonedas.
+      const cripto = !!(p && p.tipo === "cripto");
       f.querySelectorAll(".pildoras label").forEach(l => {
         const v = l.querySelector("input").value;
-        l.hidden = cuenta && v !== "dividendo";
+        l.hidden = (cuenta && v !== "dividendo") || (v === "staking" && !cripto);
         l.querySelector("span").textContent = v === "dividendo" ? (cuenta ? "Intereses" : piso ? "Alquiler" : "Dividendo")
-          : v === "comision" && piso ? "Gasto" : E.tiposMov[v];
+          : v === "comision" && piso ? "Gasto" : v === "staking" ? "Staking" : E.tiposMov[v];
       });
       f.querySelector(".pildoras").classList.toggle("una", cuenta);
       if (cuenta && f.elements.tipo.value !== "dividendo") f.elements.tipo.value = "dividendo";
+      if (!cripto && f.elements.tipo.value === "staking") f.elements.tipo.value = "compra";
       const t = f.elements.tipo.value;
       const mon = selMoneda.value || "EUR", sim = SIMBOLO[mon] || mon;
       $("#mSufCom").textContent = sim;
       const conUnid = t === "compra" || t === "venta";
-      f.querySelector(".siUnid").hidden = !conUnid;
+      f.querySelector(".siUnid").hidden = !conUnid && t !== "staking";
       f.querySelector(".siCom").hidden = !conUnid;
+      $("#mEtImporte").innerHTML = t === "staking" ? "Valor de la recompensa <em>opcional</em>" : "Importe total";
       // Con la caja de unidades oculta, la del importe ocupa su hueco sin descuadrar la rejilla.
       $("#mTodas").hidden = t !== "venta";
       $("#mAyuda").textContent = (cuenta ? AYUDA_INTERESES : piso && AYUDA_INMUEBLE[t] || AYUDA_IMPORTE[t]) + (p && manual(p) && t === "compra"
@@ -1203,8 +1222,9 @@
     }).join("");
     const ESTADO = { nuevo: "Nuevo", repetido: "Ya estaba", error: "Con error" };
     const filas = inf.filas.map(f => `<tr class="est-${f.estado}"><td>${fecha(f.fecha)}</td>
-      <td style="text-align:left">${esc(f.productoNombre)}</td><td style="text-align:left">${esc(E.tiposMov[f.tipo] || "Saldo")}</td>
-      <td>${f.unidades ? num(f.unidades) : "—"}</td><td>${eur(f.importe)}</td>
+      <td style="text-align:left">${esc(f.productoNombre)}</td><td style="text-align:left">${f.tipo === "staking"
+        ? '<span class="etqImp">Staking</span>' : esc(E.tiposMov[f.tipo] || "Saldo")}</td>
+      <td>${f.unidades ? (f.tipo === "staking" ? "+" + num(f.unidades, 8) : num(f.unidades)) : "—"}</td><td>${eur(f.importe)}</td>
       <td style="text-align:left">${f.marcas.map(m => `<span class="etqImp">${esc(m)}</span>`).join("")}</td>
       <td><span class="estado">${ESTADO[f.estado]}</span></td></tr>`).join("");
     return `<section class="tarjeta"><header><h2>Vista previa</h2>
@@ -1213,6 +1233,8 @@
         ${cifra("Movimientos nuevos", inf.añadidos, t.numCompras ? `${t.numCompras} compras` : "")}
         ${cifra("Invertido en compras", eur(t.compras))}
         ${cifra("Ventas y dividendos", eur(t.ventas + t.dividendos))}
+        ${t.numStaking ? cifra("Recompensas de staking", t.numStaking,
+          t.stakingSinValorar ? `${t.stakingSinValorar} sin valorar` : "no son compras ni cobros") : ""}
         ${inf.saldos ? cifra("Saldos anotados", inf.saldos) : ""}
         ${inf.repetidos ? cifra("Ya estaban", inf.repetidos, "se omiten") : ""}
         ${inf.sustituidos ? cifra("Sustituyen a", inf.sustituidos, "importados antes") : ""}

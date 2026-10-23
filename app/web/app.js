@@ -872,6 +872,39 @@
       (base > 0 ? ` El % es sobre todo lo que has llegado a invertir en él (${G.fmtEur(base)}).` : "") + `</p>`;
   }
 
+  // Unidades: en cripto, con todos sus decimales (una recompensa de staking puede ser de unos satoshis).
+  const fmtUnidades = (p, v) => p.tipoClave === "cripto"
+    ? Number(v).toLocaleString("es-ES", { maximumFractionDigits: 8 }) : G.nfNum.format(v);
+
+  // Lo que viene del staking y lo que es revalorización, cuando se puede separar.
+  function desgloseStaking(p) {
+    const s = p.staking;
+    const n = s.numero === 1 ? "1 recompensa" : `${s.numero} recompensas`;
+    let txt = `Staking: ${n}, +${fmtUnidades(p, s.unidades)} unidades sin poner dinero.`;
+    if (s.valorHoy != null) {
+      txt += ` Las ${fmtUnidades(p, s.vivas)} que conservas valen hoy ${G.fmtEur(s.valorHoy)}`;
+      txt += p.plusvalia != null ? `; el resto de tu plusvalía (${G.fmtEurSigno(p.plusvalia - s.valorHoy)}) es revalorización.` : ".";
+    }
+    if (s.valorRecibido) txt += ` Al recibirlas valían ${G.fmtEur(s.valorRecibido)}${s.sinValorar ? " (las que tienen el valor anotado)" : ""}.`;
+    if (s.sinValorar) txt += ` Sin valorar: ${s.sinValorar}. Para la Renta, cuando las vendas, hace falta lo que valían al recibirlas.`;
+    return `<p class="subt desglose">${txt}</p>`;
+  }
+
+  function tablaStaking(p) {
+    const s = p.staking;
+    if (!s) return "";
+    const filas = s.recompensas.slice().reverse();
+    return `<h3 style="font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--tinta3);margin:22px 0 10px">Recompensas de staking</h3>
+      <div class="tablaEnv alto"><table class="dt"><thead><tr><th>Fecha</th><th>${p.etqUnidades || "Unidades"}</th>
+        <th title="Lo que valía el día que la recibiste, si lo anotaste: no es dinero que pusieras">Valor al recibirla</th>
+        <th>Vale hoy</th></tr></thead>
+      <tbody>${filas.map(x => `<tr><td>${G.fmtFecha(x.fecha)}</td><td>+${fmtUnidades(p, x.unidades)}</td>
+        <td>${x.valor != null ? G.fmtEur(x.valor) : '<span class="subt">sin valorar</span>'}</td>
+        <td>${p.nav ? G.fmtEur(x.unidades * p.nav) : "—"}</td></tr>`).join("")}</tbody></table></div>
+      <p class="subt" style="margin:8px 0 0">No son compras ni cobros: suman unidades sin cambiar lo que has aportado, y lo que
+        valen ya está en el valor del producto. «Vale hoy» es la recompensa entera, aunque hayas vendido parte después.</p>`;
+  }
+
   // Rentabilidad del alquiler de un inmueble: bruta (lo cobrado) y neta (menos gastos), sobre lo que vale hoy.
   function desgloseAlquiler(p) {
     const al = p.alquiler;
@@ -895,8 +928,8 @@
       ["Política", p.politica], ["Mercado", p.mercado],
       [p.origen ? "Primera aportación" : "Primer dato anotado", p.desde ? G.fmtFecha(p.desde) : null],
       [p.etqUnidades || "Participaciones",
-        p.titulos != null ? G.nfNum.format(p.titulos)
-          : p.participaciones != null ? G.nfNum.format(p.participaciones) : null],
+        p.titulos != null ? fmtUnidades(p, p.titulos)
+          : p.participaciones != null ? fmtUnidades(p, p.participaciones) : null],
       ["Precio medio de compra", p.precioMedio != null ? G.fmtEur(p.precioMedio) : null],
       [p.etqPrecio || "Valor liquidativo",
         p.nav != null ? G.fmtEur(p.nav) + (p.navFecha ? " · cierre del " + G.fmtFechaCorta(p.navFecha) : "") : null],
@@ -959,12 +992,17 @@
       res.push(["Intereses, 12 meses", `<span class="${neto >= 0 ? "pos" : "neg"}">${G.fmtEurSigno(neto)}</span>` +
         (p.valor > 0 ? ` · ${G.fmtPctSigno(neto / p.valor, 2)}` : "")]);
     }
+    if (p.staking) {
+      res.push(["Staking", `+${fmtUnidades(p, p.staking.unidades)} recibidas` +
+        (p.staking.valorHoy != null ? ` · conservas ${G.fmtEur(p.staking.valorHoy)}` : "")]);
+    }
     res.push(["TIR", p.tir != null ? G.fmtPctSigno(p.tir) : "—"]);
     // Tu posición y el comportamiento del producto van en filas separadas:
     // el "1 año" del bitcoin es del precio, no de tu dinero.
     let html = `<div class="ventanas"><span class="grupoEtq">Tu posición</span>` +
       res.map(r => `<div class="ventana"><div class="e">${r[0]}</div><div class="v">${r[1]}</div></div>`).join("") +
-      `</div>` + (conCobros ? desgloseGanancia(p) : "") + (al ? desgloseAlquiler(p) : "");
+      `</div>` + (conCobros ? desgloseGanancia(p) : "") + (al ? desgloseAlquiler(p) : "") +
+      (p.staking ? desgloseStaking(p) : "");
     if (p.ventanas) {
       const et = { "1m": "1 mes", "3m": "3 meses", "6m": "6 meses", ytd: "En el año", "1a": "1 año" };
       const celdas = ["1m", "3m", "6m", "ytd", "1a"].filter(k => p.ventanas[k] != null)
@@ -1095,9 +1133,10 @@
     const sec = $("#fondoTabla");
     const filas = (p.aportaciones || []).filter(a => a.importe).slice().reverse();
     if (!filas.length) {
-      sec.innerHTML = `<header><h2>${(p.traspasos || []).length ? "Movimientos" : "Aportaciones"}</h2></header>
-        ${(p.traspasos || []).length ? "" : '<p class="vacio">Este componente no tiene aportaciones registradas: solo anotas su valor.</p>'}
-        ${tablaTraspasos(p)}`;
+      const otros = (p.traspasos || []).length || p.staking;
+      sec.innerHTML = `<header><h2>${otros ? "Movimientos" : "Aportaciones"}</h2></header>
+        ${otros ? "" : '<p class="vacio">Este componente no tiene aportaciones registradas: solo anotas su valor.</p>'}
+        ${tablaTraspasos(p)}${tablaStaking(p)}`;
       return;
     }
     const esFondo = p.tipoClave === "fondo" || p.tipoClave === "pension";
@@ -1122,7 +1161,7 @@
             <td class="${pl >= 0 ? "pos" : "neg"}">${pl != null ? G.fmtEurSigno(pl) : "—"}</td>
             <td class="${rt >= 0 ? "pos" : "neg"}">${rt != null ? G.fmtPctSigno(rt, 1) : "—"}</td>
             <td>${dias}</td></tr>`;
-        }).join("")}</tbody></table></div>${tablaTraspasos(p)}`;
+        }).join("")}</tbody></table></div>${tablaTraspasos(p)}${tablaStaking(p)}`;
   }
 
   /* ================================================================
@@ -1310,7 +1349,9 @@
     const aviso = `<div class="fiscalAviso"><b>Orientativo, para repasar el borrador: no es asesoramiento fiscal.</b>
       Ventas como Hacienda (FIFO; los traspasos entre fondos conservan coste y fecha). Rumbo no sabe tus retenciones ni tu
       situación: compáralo con los datos fiscales de tu banco.</div>`;
-    if (!j.ventas.length && !j.cobros.length && !j.rescates.length && !j.comisiones.length && !j.gastosAlquiler.length) {
+    const staking = j.staking || [];
+    if (!j.ventas.length && !j.cobros.length && !j.rescates.length && !j.comisiones.length && !j.gastosAlquiler.length
+        && !staking.length) {
       cont.innerHTML = aviso + `<p class="vacio" style="text-align:left;padding:4px 0">En ${escH(j.ano)} no anotaste
         ventas, dividendos, intereses ni alquileres: no hay nada que declarar de tus inversiones ese año.</p>` +
         j.avisos.map(a => `<div class="av"><span>⚠</span><span>${escH(a)}</span></div>`).join("");
@@ -1328,10 +1369,16 @@
     if (t.alquileres || t.gastosAlquiler) kpis.push({ e: "Alquileres", v: G.fmtEur(t.alquileres),
       n: t.gastosAlquiler ? `cobrados; ${G.fmtEur(t.gastosAlquiler)} de gastos anotados` : "cobrados, como los anotaste" });
     if (t.comisiones) kpis.push({ e: "Comisiones aparte", v: G.fmtEur(t.comisiones), n: "custodia y otras, sin compra ni venta" });
+    if (staking.length) {
+      const nr = staking.reduce((a, x) => a + x.recompensas, 0);
+      kpis.push({ e: "Recompensas de staking", v: t.staking ? G.fmtEur(t.staking) : "sin valorar",
+        n: t.stakingSinValorar ? `${nr} recompensas, ${t.stakingSinValorar} sin valorar` : `${nr} recompensas, por lo que valían al recibirlas` });
+    }
     const fechasCompra = v => {
       const fs = [...new Set(v.compras.map(c => c.fecha))].sort();
       if (!fs.length) return "—";
-      return fs.length === 1 ? G.fmtFecha(fs[0]) : `${G.fmtFecha(fs[0])} a ${G.fmtFecha(fs[fs.length - 1])} (${fs.length} compras)`;
+      return fs.length === 1 ? G.fmtFecha(fs[0]) : `${G.fmtFecha(fs[0])} a ${G.fmtFecha(fs[fs.length - 1])} ` +
+        `(${fs.length} ${v.compras.some(c => c.staking) ? "fechas, con recompensas de staking" : "compras"})`;
     };
     const tablaVentas = j.ventas.length ? `<h3>Ventas</h3>
       <div class="tablaEnv"><table class="dt"><thead><tr><th>Producto</th><th>Vendido el</th><th>Comprado el</th>
@@ -1340,7 +1387,8 @@
           <td>${escH(v.nombre)}<span class="fiscalRevisar">${v.isin ? escH(v.isin) + " · " : ""}${escH(v.tipo)}</span>
             ${v.avisos.map(a => `<span class="fiscalRevisar">⚠ ${escH(a)}</span>`).join("")}</td>
           <td>${G.fmtFecha(v.fecha)}</td><td>${fechasCompra(v)}</td>
-          <td>${G.fmtEur(v.transmision)}</td><td>${v.adquisicion != null ? G.fmtEur(v.adquisicion) : "—"}</td>
+          <td>${G.fmtEur(v.transmision)}</td><td>${v.adquisicion != null ? G.fmtEur(v.adquisicion) : "—"}${v.adquisicionIncompleta
+            ? ' <span class="fiscalRevisar">incompleta</span>' : ""}</td>
           <td>${signo(v.ganancia)}</td></tr>`).join("")}</tbody>
        <tfoot><tr><td>Total</td><td></td><td></td><td>${G.fmtEur(t.transmision)}</td><td>${G.fmtEur(t.adquisicion)}</td>
          <td>${signo(t.saldo)}</td></tr></tfoot></table></div>` : "";
@@ -1349,6 +1397,12 @@
       <div class="tablaEnv"><table class="dt"><thead><tr><th>Producto</th><th>Qué es</th><th>Cobros</th><th>Importe anotado</th></tr></thead>
        <tbody>${j.cobros.map(x => `<tr><td>${escH(x.nombre)}</td><td>${escH(x.clase)}</td><td>${x.cobros}</td>
          <td>${G.fmtEur(x.importe)}</td></tr>`).join("")}</tbody></table></div>` : "";
+    const tablaStaking = staking.length ? `<h3>Recompensas de staking</h3>
+      <div class="tablaEnv"><table class="dt"><thead><tr><th>Producto</th><th>Recompensas</th><th>Unidades</th>
+        <th>Valor anotado</th><th>Sin valorar</th></tr></thead>
+       <tbody>${staking.map(x => `<tr><td>${escH(x.nombre)}</td><td>${x.recompensas}</td>
+         <td>${x.unidades.toLocaleString("es-ES", { maximumFractionDigits: 8 })}</td>
+         <td>${x.valorado ? G.fmtEur(x.valorado) : "—"}</td><td>${x.sinValorar || "—"}</td></tr>`).join("")}</tbody></table></div>` : "";
     const tablaRescates = j.rescates.length ? `<h3>Rescates de planes de pensiones</h3>
       <div class="tablaEnv"><table class="dt"><thead><tr><th>Plan</th><th>Fecha</th><th>Rescatado</th></tr></thead>
        <tbody>${j.rescates.map(v => `<tr><td>${escH(v.nombre)}</td><td>${G.fmtFecha(v.fecha)}</td>
@@ -1357,7 +1411,7 @@
       `<div class="kpis" style="margin:6px 0 8px">${kpis.map(k =>
         `<div class="kpi"><div class="e">${k.e}</div><div class="v">${k.v}</div><div class="n">${k.n}</div></div>`).join("")}</div>` +
       j.avisos.map(a => `<div class="av"><span>⚠</span><span>${escH(a)}</span></div>`).join("") +
-      tablaVentas + tablaCobros + tablaRescates +
+      tablaVentas + tablaCobros + tablaStaking + tablaRescates +
       `<p style="margin:18px 0 0"><a class="btn" id="fiscalBajar">Descargar en Excel (CSV)</a></p>`;
     const bajar = $("#fiscalBajar");
     bajar.href = URL.createObjectURL(new Blob(["\ufeff" + j.csv], { type: "text/csv;charset=utf-8" }));
