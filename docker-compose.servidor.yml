@@ -1,0 +1,29 @@
+# Rumbo en mi servidor, construida desde el código de este fork
+#
+#   Arrancar o actualizar:  git pull && docker compose -f docker-compose.servidor.yml up -d --build
+#   Ver la llave:           docker compose -f docker-compose.servidor.yml logs rumbo
+#   Parar:                  docker compose -f docker-compose.servidor.yml down
+#
+# Diferencias con docker-compose.yml:
+#   - Construye la imagen desde este código (con los cambios del fork), en vez de descargar la oficial.
+#   - Los datos van en la carpeta ./mis_datos, junto a este archivo, y no en un volumen de Docker:
+#     así se copian y se respaldan como cualquier carpeta. Tiene que ser del usuario 1000
+#     (sudo chown -R 1000:1000 mis_datos), que es con el que corre Rumbo dentro del contenedor.
+#
+# Paso a paso, en docs/servidor.md.
+# NO abras el puerto 8765 a internet en tu router: para entrar desde fuera de casa, usa Tailscale.
+
+services:
+  rumbo:
+    build: .
+    image: rumbo-fork:local
+    container_name: rumbo
+    restart: unless-stopped
+    ports:
+      - "8765:8765"
+    volumes:
+      - ./mis_datos:/data
+    environment:
+      - TZ=Europe/Madrid
+      # Si entras con un nombre propio que Rumbo no reconoce (rumbo.midominio.com), añádelo aquí:
+      # - PATRIMONIO_HOSTS_PERMITIDOS=rumbo.midominio.com
