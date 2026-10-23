@@ -789,11 +789,26 @@
   }
 
   /* ---------------------------------------------- fondo de emergencia */
-  function formColchon() {
-    const c = E.cfg.colchon || { modo: "meses", meses: 6 };
-    const f = abreModal("Mi fondo de emergencia", `
-      <p>Lo que quieres tener siempre a mano por si pasa algo (una avería, quedarte sin trabajo…). Lo habitual es entre
-        3 y 6 meses de gastos. Rumbo lo compara con tu liquidez y te dice cuánto te sobra para invertir.</p>
+  // Los fondos guardados; una cartera de antes tiene uno solo, sin productos.
+  const fondosGuardados = () => Array.isArray(E.cfg.colchones) ? E.cfg.colchones
+    : E.cfg.colchon ? [{ id: "c1", nombre: "Fondo de emergencia", productos: [], ...E.cfg.colchon }] : [];
+
+  function formColchon(id, nuevo) {
+    const lista = fondosGuardados();
+    const actual = nuevo ? null : lista.find(x => x.id === id) || lista[0] || null;
+    const c = actual || { modo: "meses", meses: 6, nombre: lista.length ? "" : "Fondo de emergencia", productos: [] };
+    // Un producto solo puede estar en un fondo: los de los demás salen, pero sin poder marcarlos.
+    const enOtro = new Map();
+    lista.filter(x => x !== actual).forEach(x => (x.productos || []).forEach(pid => enOtro.set(pid, x.nombre)));
+    const candidatos = E.cfg.productos.filter(p => p.tipo !== "deuda");
+    const casilla = p => `<label class="onoff${(c.productos || []).includes(p.id) ? "" : " fuera"}"${enOtro.has(p.id)
+      ? ` title="Ya está en «${esc(enOtro.get(p.id))}»"` : ""}><input type="checkbox" data-cprod="${esc(p.id)}"${
+      (c.productos || []).includes(p.id) ? " checked" : ""}${enOtro.has(p.id) ? " disabled" : ""}><span class="pista"></span>
+      <span class="nmP">${esc(nombre(p))}${enOtro.has(p.id) ? ` · en «${esc(enOtro.get(p.id))}»` : ""}</span></label>`;
+    const f = abreModal(actual ? "Fondo de emergencia" : "Nuevo fondo", `
+      <p>Lo que quieres tener siempre a mano por si pasa algo (una avería, quedarte sin trabajo…), o apartado para algo
+        (la casa, la familia…). Lo habitual en un fondo de emergencia es entre 3 y 6 meses de gastos.</p>
+      <div class="rejilla" style="margin-top:12px">${campo("Nombre", '<input name="nombre" maxlength="60" placeholder="Fondo de emergencia">', "", "ancho")}</div>
       <div class="pildoras" style="grid-template-columns:repeat(2,1fr);margin-top:12px">
         <label><input type="radio" name="modo" value="meses"><span>En meses de gastos</span></label>
         <label><input type="radio" name="modo" value="importe"><span>Un importe fijo</span></label></div>
@@ -804,29 +819,39 @@
       <div class="rejilla siImporte" style="margin-top:16px">
         ${campo("Importe", '<div class="conSufijo"><input name="importe" inputmode="decimal" placeholder="12.000"><span>€</span></div>')}
       </div>
+      <div class="secc" style="margin-top:16px">Dónde lo tienes</div>
+      <p class="ayuda">Marca los productos de este fondo: valen todos, no solo las cuentas y los monetarios. Si no marcas
+        ninguno, lo cubre tu liquidez que no esté en otro fondo.</p>
+      <span class="onoffs">${candidatos.map(casilla).join("")}</span>
       <div class="resumen"><span id="cResumen"></span></div>
-      ${E.cfg.colchon ? '<p class="ayuda"><button type="button" class="btn" id="cBorrar">Quitar mi fondo de emergencia</button></p>' : ""}`,
+      ${actual ? '<p class="ayuda"><button type="button" class="btn" id="cBorrar">Quitar este fondo</button></p>' : ""}`,
     async f => {
-      const j = await api("POST", "api/colchon", campos(f));
+      const d = { ...campos(f), productos: [...f.querySelectorAll("[data-cprod]:checked")].map(x => x.dataset.cprod) };
+      if (actual) d.id = actual.id;
+      else d.nuevo = true;
+      const j = await api("POST", "api/colchon", d);
       E.cfg = j.cartera;
       window.EDITOR_SUCIO = true;
       return () => { recuerda.guarda("patrimonio.tab", "patrimonio"); location.reload(); };
     });
-    rellena(f, { modo: c.modo, meses: decimal(c.meses), gastoMensual: decimal(c.gastoMensual), importe: decimal(c.importe) });
+    rellena(f, { nombre: c.nombre, modo: c.modo, meses: decimal(c.meses), gastoMensual: decimal(c.gastoMensual),
+      importe: decimal(c.importe) });
+    f.querySelectorAll("[data-cprod]").forEach(x => x.addEventListener("change", () =>
+      x.closest(".onoff").classList.toggle("fuera", !x.checked)));
     const ajusta = () => {
       const m = f.elements.modo.value;
       f.querySelector(".siMeses").hidden = m !== "meses";
       f.querySelector(".siImporte").hidden = m !== "importe";
       const total = m === "meses" ? leeNum(f.elements.meses.value) * leeNum(f.elements.gastoMensual.value) : leeNum(f.elements.importe.value);
-      $("#cResumen").textContent = total > 0 ? `Tu fondo de emergencia: ${eur(total)}.` : "Rellena las cifras.";
+      $("#cResumen").textContent = total > 0 ? `${f.elements.nombre.value.trim() || "Tu fondo"}: ${eur(total)}.` : "Rellena las cifras.";
     };
     f.oninput = ajusta;
     f.onchange = ajusta;
     ajusta();
     const borrar = $("#cBorrar");
     if (borrar) borrar.onclick = async () => {
-      if (!confirm("¿Quitar tu fondo de emergencia?")) return;
-      try { await api("POST", "api/colchon", { borrar: true }); recuerda.guarda("patrimonio.tab", "patrimonio"); location.reload(); }
+      if (!confirm(`¿Quitar «${actual.nombre}»? Los productos no se tocan.`)) return;
+      try { await api("POST", "api/colchon", { id: actual.id, borrar: true }); recuerda.guarda("patrimonio.tab", "patrimonio"); location.reload(); }
       catch (x) { alert(x.message); }
     };
   }
@@ -1525,7 +1550,7 @@
     nuevoAjuste: soloPropio(() => formAjuste(null)),
     objetivo: soloPropio(() => formObjetivo()),
     reparto: (...a) => (E.modo === "demo" ? formReparto() : soloPropio(() => formReparto())(...a)),
-    colchon: soloPropio(() => formColchon()),
+    colchon: soloPropio((id, nuevo) => formColchon(id, nuevo)),
     editarMov: soloPropio(id => formMovimiento(E.cfg.movimientos.find(m => m.id === id))),
     borrarMov: soloPropio(borrarMov),
     nuevoValor: soloPropio(id => formValor(null, id)),
@@ -1619,7 +1644,7 @@
   })();
 
   window.Editor = { mostrar: pinta, objetivo: () => ACC.objetivo(), reparto: () => ACC.reparto(),
-    colchon: () => ACC.colchon(), perfiles };
+    colchon: (id, nuevo) => ACC.colchon(id, nuevo), perfiles };
   // El panel pudo pintarse antes de que llegara el editor: que vuelva a pintar sus botones de «Cambiar».
   document.dispatchEvent(new Event("rumbo:editor"));
   carga().then(pinta).catch(x => {

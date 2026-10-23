@@ -529,44 +529,66 @@
   function pintaLiquidez() {
     const sec = $("#seccionLiquidez");
     if (!sec) return;
-    const c = D.colchon;
-    const R = C.resumenLiquidez(TODOS(), c, valorDe);
-    const lista = R.productos, liquidez = R.liquidez;
+    // Los fondos: los de ahora o, con datos de una versión anterior, el único que había.
+    const fondos = D.colchones || (D.colchon ? [{ id: "c1", nombre: "Fondo de emergencia", productos: [], ...D.colchon }] : []);
+    const c = fondos[0];
+    const liquidez = C.resumenLiquidez(TODOS(), null, valorDe).liquidez;
+    const R = C.resumenColchones(TODOS(), fondos, valorDe);
+    const conProductos = R.fondos.some(x => !x.deLiquidez);
+    const lista = R.libres, libre = R.liquidezLibre;
     const editable = window.Editor && window.Editor.colchon && D.modo === "propio";
-    sec.hidden = !lista.length && !c;
+    sec.hidden = !liquidez && !c;
     if (sec.hidden) return;
     const btn = $("#btnColchon");
     btn.hidden = !editable || !c;
-    btn.onclick = () => window.Editor.colchon();
+    btn.textContent = "+ Añadir fondo";
+    btn.onclick = () => window.Editor.colchon(null, true);
     const total = metricas(TODOS()).valor;
     $("#liqNota").textContent = `${G.fmtEur(liquidez, 0)} disponibles en días · ${G.fmtPct(total ? liquidez / total : 0, 0)} de tu patrimonio`;
-    const tabla = `<div class="tablaEnv" style="margin-top:14px"><table class="dt"><tbody>${lista.map(p =>
+    const tabla = lista.length ? `${conProductos ? `<h3 style="font-size:12px;text-transform:uppercase;letter-spacing:.07em;
+        color:var(--tinta3);margin:22px 0 0">Liquidez que no está en ningún fondo</h3>` : ""}
+      <div class="tablaEnv" style="margin-top:14px"><table class="dt"><tbody>${lista.map(p =>
       `<tr><td><i class="pt" style="background:${color(p)}"></i>${p.corto || p.nombre}</td><td>${G.fmtEur(valorDe(p), 0)}</td>
-       <td class="subt">${G.fmtPct(liquidez ? valorDe(p) / liquidez : 0, 0)}</td></tr>`).join("")}</tbody></table></div>`;
+       <td class="subt">${G.fmtPct(libre ? valorDe(p) / libre : 0, 0)}</td></tr>`).join("")}</tbody></table></div>` : "";
     const queCuenta = '<p class="subt" style="margin:10px 0 0">Cuentan las cuentas y los fondos monetarios. Para cambiar qué cuenta, en la ficha del producto: «Cuenta como liquidez».</p>';
     if (!c) {
       $("#liqCuerpo").innerHTML = `<p class="subt" style="margin:0 0 12px">¿Cuánto quieres tener siempre a mano por si
         pasa algo? Dilo en meses de gastos (lo habitual es entre 3 y 6) y Rumbo te dirá si lo tienes cubierto y cuánto te
         sobra para invertir.</p>${editable ? '<button class="btn prim" id="btnColchonNuevo">Definir mi fondo de emergencia</button>' : ""}${tabla}${queCuenta}`;
-      if (editable) $("#btnColchonNuevo").onclick = () => window.Editor.colchon();
+      if (editable) $("#btnColchonNuevo").onclick = () => window.Editor.colchon(null, true);
       return;
     }
-    const { objetivo, cubierto, sobra, meses, pct } = R;
+    const varios = R.fondos.length > 1;
+    const plan = x => x.modo === "meses" ? `${String(x.meses).replace(".", ",")} meses de ${G.fmtEur(x.gastoMensual, 0)}` : "importe fijo";
+    // Cada fondo con su barra: lo que tiene (sus productos, o la liquidez libre) frente a lo que pide.
+    const fila = x => {
+      const donde = x.deLiquidez ? "lo cubre tu liquidez que no está en ningún fondo"
+        : x.prods.length ? x.prods.map(p => p.corto || p.nombre).join(", ") : "sus productos ya no están";
+      const estado = x.falta > 0.5 ? ` · <span class="neg">le faltan ${G.fmtEur(x.falta, 0)}</span>`
+        : x.sobra > 0.5 ? ` · le sobran ${G.fmtEur(x.sobra, 0)}` : "";
+      return `<div class="prog" style="margin-top:18px;max-width:none">
+        <div class="progPie" style="margin-bottom:6px"><span><b style="color:var(--tinta)">${escH(x.nombre)}</b> · ${plan(x)}</span>
+          ${editable ? `<button class="btn" data-colchon="${escH(x.id)}">Editar</button>` : ""}</div>
+        <div class="progBarra"><div class="progRelleno" style="width:${(x.pct * 100).toFixed(1)}%"></div></div>
+        <div class="progPie"><span><b style="color:var(--tinta)">${G.fmtPct(x.pct, 0)}</b> cubierto${estado}</span>
+          <span>${G.fmtEur(x.tiene, 0)} de ${G.fmtEur(x.importe, 0)}</span></div>
+        <p class="subt" style="margin:4px 0 0">${escH(donde)}${x.mesesCubiertos != null
+          ? ` · te cubre ${x.mesesCubiertos.toLocaleString("es-ES", { maximumFractionDigits: 1 })} meses de gastos` : ""}</p></div>`;
+    };
+    const falta = R.falta > 0.5;
     $("#liqCuerpo").innerHTML = `
       <div class="cifras">
-        <div class="cifra"><span>Fondo de emergencia</span><b>${G.fmtEur(objetivo, 0)}</b>
-          <small>${c.modo === "meses" ? `${String(c.meses).replace(".", ",")} meses de ${G.fmtEur(c.gastoMensual, 0)}` : "importe fijo"}</small></div>
-        <div class="cifra"><span>Tienes en liquidez</span><b>${G.fmtEur(liquidez, 0)}</b>
-          <small>${meses != null ? `te cubre ${meses.toLocaleString("es-ES", { maximumFractionDigits: 1 })} meses de gastos` : "cuentas y monetarios"}</small></div>
-        <div class="cifra"><span>${sobra >= 0 ? "Disponible para invertir" : "Te falta para completarlo"}</span>
-          <b class="${sobra >= 0 ? "pos" : "neg"}">${G.fmtEur(Math.abs(sobra), 0)}</b>
-          <small>${sobra >= 0 ? "lo que pasa del colchón" : "antes de invertir más"}</small></div>
+        <div class="cifra"><span>${varios ? "Tus fondos" : escH(c.nombre)}</span><b>${G.fmtEur(R.objetivo, 0)}</b>
+          <small>${varios ? `${R.fondos.length} fondos` : plan(c)}</small></div>
+        <div class="cifra"><span>${falta ? (varios ? "Te falta para completarlos" : "Te falta para completarlo") : "Cubierto"}</span>
+          <b class="${falta ? "neg" : "pos"}">${G.fmtEur(falta ? R.falta : R.objetivo, 0)}</b>
+          <small>${falta ? "antes de invertir más" : varios ? "todos tus fondos" : "todo el fondo"}</small></div>
+        <div class="cifra"><span>Disponible para invertir</span><b class="pos">${G.fmtEur(R.disponible, 0)}</b>
+          <small>liquidez que no está en ningún fondo</small></div>
       </div>
-      <div class="prog" style="margin-top:18px;max-width:none">
-        <div class="progBarra"><div class="progRelleno" style="width:${(pct * 100).toFixed(1)}%"></div></div>
-        <div class="progPie"><span><b style="color:var(--tinta)">${G.fmtPct(pct, 0)}</b> del fondo de emergencia cubierto</span>
-          <span>${G.fmtEur(cubierto, 0)} de ${G.fmtEur(objetivo, 0)}</span></div></div>
+      ${R.fondos.map(fila).join("")}
       ${tabla}${queCuenta}`;
+    $("#liqCuerpo").querySelectorAll("[data-colchon]").forEach(b => { b.onclick = () => window.Editor.colchon(b.dataset.colchon); });
   }
 
   /* ---------------------------------------------- reparto objetivo y rebalanceo */

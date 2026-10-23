@@ -155,11 +155,32 @@ def guarda_objetivo(cfg, datos):
 
 # ---------------------------------------------------------------- fondo de emergencia
 
+def _lista_colchones(cfg):
+    """Los fondos guardados. Una cartera de antes, con un solo «colchon», pasa a tener la lista."""
+    viejo = cfg.pop("colchon", None)
+    if not isinstance(cfg.get("colchones"), list):
+        cfg["colchones"] = [{"id": "c1", "nombre": "Fondo de emergencia", **viejo}] if isinstance(viejo, dict) else []
+    return cfg["colchones"]
+
+
 def guarda_colchon(cfg, datos):
-    """Tu fondo de emergencia: X meses de gastos o un importe fijo."""
+    """
+    Un fondo de emergencia (o para la casa, la familia…): X meses de gastos o un importe fijo, y
+    los productos en los que lo tienes. Sin productos, lo cubre la liquidez que no está en ningún
+    fondo. Con 'id' se cambia (o se borra) ese fondo; con 'nuevo' se añade otro; sin ninguno de
+    los dos, el primero, como cuando solo había uno.
+    """
+    lista = _lista_colchones(cfg)
+    existente = next((c for c in lista if c.get("id") == datos.get("id")), None) if datos.get("id") else None
+    if datos.get("id") and not existente:
+        raise ErrorValidacion(["Ese fondo ya no existe."])
     if datos.get("borrar"):
-        cfg.pop("colchon", None)
+        if existente:
+            lista.remove(existente)
+        else:
+            lista.clear()
         return None
+    destino = existente or (None if datos.get("nuevo") else (lista[0] if lista else None))
     errores = []
     modo = "importe" if datos.get("modo") == "importe" else "meses"
     if modo == "meses":
@@ -167,15 +188,37 @@ def guarda_colchon(cfg, datos):
         gasto = numero(datos.get("gastoMensual"), "lo que gastas al mes", errores, mayor_que=0)
         if meses and meses > 60:
             errores.append("Más de 60 meses no parece un fondo de emergencia: revisa el número.")
-        if errores:
-            raise ErrorValidacion(errores)
-        cfg["colchon"] = {"modo": "meses", "meses": round(meses, 1), "gastoMensual": round(gasto, 2)}
+        cifras = {"modo": "meses", "meses": round(meses or 0, 1), "gastoMensual": round(gasto or 0, 2)}
     else:
-        importe = numero(datos.get("importe"), "el importe del fondo de emergencia", errores, mayor_que=0)
-        if errores:
-            raise ErrorValidacion(errores)
-        cfg["colchon"] = {"modo": "importe", "importe": round(importe, 2)}
-    return cfg["colchon"]
+        importe = numero(datos.get("importe"), "el importe del fondo", errores, mayor_que=0)
+        cifras = {"modo": "importe", "importe": round(importe or 0, 2)}
+    productos = (destino or {}).get("productos") or []
+    if datos.get("productos") is not None:
+        productos = []
+        for pid in datos["productos"] if isinstance(datos["productos"], list) else []:
+            p = producto(cfg, pid)
+            otro = next((c for c in lista if c is not destino and pid in (c.get("productos") or [])), None)
+            if not p:
+                errores.append("Uno de los productos elegidos ya no existe.")
+            elif p.get("tipo") == "deuda":
+                errores.append(f"«{p.get('corto') or p['nombre']}» es una deuda: no puede ser parte de un fondo.")
+            elif otro:
+                errores.append(f"«{p.get('corto') or p['nombre']}» ya está en «{otro.get('nombre')}»: un producto "
+                               "solo puede estar en un fondo.")
+            elif pid not in productos:
+                productos.append(pid)
+    if errores:
+        raise ErrorValidacion(errores)
+    nombre = texto(datos.get("nombre"), 60) or (destino or {}).get("nombre") or "Fondo de emergencia"
+    nuevo = {"nombre": nombre, **cifras, "productos": productos}
+    if destino:
+        cid = destino["id"]
+        destino.clear()
+        destino.update(id=cid, **nuevo)
+        return destino
+    nuevo = {"id": siguiente_id(lista, "c"), **nuevo}
+    lista.append(nuevo)
+    return nuevo
 
 
 # ---------------------------------------------------------------- reparto objetivo (rebalanceo)
@@ -294,6 +337,9 @@ def borra_producto(cfg, pid):
     cfg["productos"] = [p for p in cfg["productos"] if p["id"] != pid]
     cfg["movimientos"] = [m for m in cfg.get("movimientos", []) if pid not in (m.get("producto"), m.get("destino"))]
     cfg["valoraciones"] = [v for v in cfg.get("valoraciones", []) if v.get("producto") != pid]
+    for c in cfg.get("colchones") or []:
+        if pid in (c.get("productos") or []):
+            c["productos"].remove(pid)
     for c in cfg.get("comparador", []):
         if c.get("pesos"):
             c["pesos"].pop(pid, None)
