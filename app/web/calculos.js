@@ -175,6 +175,35 @@
     return r;
   }
 
+  /**
+   * Varios fondos (emergencia, la casa, la familia…). Uno con productos tiene lo que valen esos
+   * productos, sean o no liquidez. Uno sin productos se cubre, por orden, con la liquidez que no
+   * está en ningún fondo; lo que queda de ella es lo disponible para invertir. Lo que le sobra a
+   * un fondo con productos se queda en ese fondo.
+   */
+  function resumenColchones(lista, colchones, valorDe = valorPorDefecto) {
+    const porId = new Map(lista.map(p => [p.id, p]));
+    const asignados = new Set((colchones || []).flatMap(c => c.productos || []));
+    const libres = lista.filter(p => esLiquidez(p) && !asignados.has(p.id) && valorDe(p) > 0)
+      .sort((a, b) => valorDe(b) - valorDe(a));
+    const liquidezLibre = libres.reduce((a, p) => a + valorDe(p), 0);
+    let bolsa = liquidezLibre;
+    const fondos = (colchones || []).map(c => {
+      const deLiquidez = !(c.productos || []).length;
+      const prods = (c.productos || []).map(id => porId.get(id)).filter(Boolean);
+      let tiene = prods.reduce((a, p) => a + valorDe(p), 0);
+      if (deLiquidez) {
+        tiene = Math.min(bolsa, c.importe);
+        bolsa -= tiene;
+      }
+      return { ...c, prods, deLiquidez, tiene, pct: c.importe > 0 ? Math.min(1, tiene / c.importe) : 1,
+        sobra: Math.max(0, tiene - c.importe), falta: Math.max(0, c.importe - tiene),
+        mesesCubiertos: c.modo === "meses" && c.gastoMensual ? tiene / c.gastoMensual : null };
+    });
+    return { fondos, libres, liquidezLibre, disponible: bolsa,
+      objetivo: fondos.reduce((a, f) => a + f.importe, 0), falta: fondos.reduce((a, f) => a + f.falta, 0) };
+  }
+
   /* ---------------------------------------------- reparto objetivo y rebalanceo */
   // Por tipo de activo, pocos cubos y claros: la categoría de Morningstar («RV Global Emergente»,
   // «Mercado Monetario Corto Plazo EUR»…) es demasiado fina y parte la bolsa en trozos.
@@ -355,7 +384,7 @@
   }
 
   return {
-    leeImporte, xirr, metricas, agregaExposicion, esLiquidez, resumenLiquidez,
+    leeImporte, xirr, metricas, agregaExposicion, esLiquidez, resumenLiquidez, resumenColchones,
     gruposReparto, filasReparto, repartirAportacion, normalizaReparto, tipoReparto, TIPOS_REPARTO,
     cuentaPorDefecto, cuentaEnReparto, FUERA_DE_BOLSA, periodicasPendientes,
     resumenParaCompartir,

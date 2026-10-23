@@ -109,6 +109,56 @@ test("liquidez: cuentas y monetarios, o lo que marques", () => {
   assert.equal(C.resumenLiquidez(prods, null).objetivo, null);
 });
 
+test("varios fondos: los suyos, o la liquidez que no está en ninguno", () => {
+  const prods = [
+    { id: "mon1", tipoClave: "fondo", clase: "Monetario", valor: 5000 },      // fondo personal
+    { id: "mon2", tipoClave: "fondo", clase: "Monetario", valor: 9000 },      // casa
+    { id: "rfuc", tipoClave: "fondo", clase: "RF Ultra Corto Plazo", valor: 12000 },   // casa, aunque no es liquidez
+    { id: "cta", tipoClave: "efectivo", valor: 3000 },                        // familia
+    { id: "libre", tipoClave: "efectivo", valor: 4000 },                      // en ningún fondo
+    { id: "etf", tipoClave: "etf", valor: 50000 },
+  ];
+  const fondos = [
+    { id: "c1", nombre: "Personal", modo: "importe", importe: 6000, productos: ["mon1"] },
+    { id: "c2", nombre: "Casa", modo: "importe", importe: 20000, productos: ["mon2", "rfuc"] },
+    { id: "c3", nombre: "Familia", modo: "meses", meses: 3, gastoMensual: 1500, importe: 4500, productos: ["cta"] },
+    { id: "c4", nombre: "Imprevistos", modo: "importe", importe: 1500, productos: [] },
+  ];
+  const r = C.resumenColchones(prods, fondos);
+  const por = Object.fromEntries(r.fondos.map(f => [f.id, f]));
+  assert.equal(por.c1.tiene, 5000);
+  assert.equal(por.c1.falta, 1000);
+  cerca(por.c1.pct, 0.833);
+  assert.equal(por.c2.tiene, 21000);                 // monetario + RF ultra corto
+  assert.equal(por.c2.sobra, 1000);                  // lo que sobra se queda en su fondo
+  assert.equal(por.c2.falta, 0);
+  assert.equal(por.c2.pct, 1);
+  assert.deepEqual(por.c2.prods.map(p => p.id), ["mon2", "rfuc"]);
+  cerca(por.c3.mesesCubiertos, 2);
+  assert.equal(por.c3.meses, 3);                     // lo que pide el fondo no cambia
+  assert.equal(por.c4.tiene, 1500);                  // sin productos: de la liquidez libre
+  assert.ok(por.c4.deLiquidez);
+  assert.deepEqual(r.libres.map(p => p.id), ["libre"]);
+  assert.equal(r.liquidezLibre, 4000);
+  assert.equal(r.disponible, 2500);                  // lo que queda de la libre
+  assert.equal(r.objetivo, 32000);
+  assert.equal(r.falta, 2500);                       // 1000 del personal + 1500 de la familia
+});
+
+test("varios fondos: los que no tienen productos se reparten la liquidez por orden", () => {
+  const prods = [{ id: "a", tipoClave: "efectivo", valor: 3000 }];
+  const r = C.resumenColchones(prods, [
+    { id: "c1", importe: 2000, productos: [] }, { id: "c2", importe: 2000, productos: [] }]);
+  assert.deepEqual(r.fondos.map(f => f.tiene), [2000, 1000]);
+  assert.equal(r.disponible, 0);
+  assert.equal(r.falta, 1000);
+  // Un producto que ya no está (borrado, o de otro perfil) no cuenta, pero el fondo sigue siendo «con productos».
+  const s = C.resumenColchones(prods, [{ id: "c1", importe: 2000, productos: ["no_esta"] }]);
+  assert.equal(s.fondos[0].tiene, 0);
+  assert.equal(s.disponible, 3000);
+  assert.deepEqual(C.resumenColchones(prods, []).fondos, []);
+});
+
 const RV = "Renta variable", RF = "Renta fija";
 const O = { por: "clase", pesos: { [RV]: 80, [RF]: 20 }, vigilar: 3, rebalancear: 5, conEfectivo: false };
 const CARTERA = [

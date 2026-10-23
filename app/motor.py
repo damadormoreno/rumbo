@@ -602,9 +602,33 @@ def objetivo_propio(cfg):
             "etiqueta": sin_html(o.get("etiqueta") or "Mi objetivo")}
 
 
+def colchones(cfg):
+    """
+    Tus fondos de emergencia (o de lo que sea: la casa, la familia…), en orden: cada uno con su
+    objetivo en euros y los productos que lo cubren. Uno sin productos lo cubre la liquidez que no
+    está en ningún fondo. Una cartera de antes, con un solo «colchon», es un fondo sin productos.
+    """
+    lista = cfg.get("colchones")
+    if not isinstance(lista, list):
+        viejo = cfg.get("colchon")
+        lista = [{**viejo, "id": "c1", "nombre": "Fondo de emergencia"}] if isinstance(viejo, dict) else []
+    out = []
+    for c in lista:
+        cifras = _cifras_colchon(c)
+        if cifras:
+            out.append({"id": sin_html(str(c.get("id") or "")), "nombre": sin_html(c.get("nombre") or "Fondo de emergencia"),
+                        **cifras, "productos": [p for p in c.get("productos") or [] if isinstance(p, str)]})
+    return out
+
+
 def colchon(cfg):
-    """El fondo de emergencia elegido (en euros) o None."""
-    c = cfg.get("colchon")
+    """El primer fondo de emergencia (en euros) o None."""
+    lista = cfg.get("colchones")
+    return _cifras_colchon(lista[0] if isinstance(lista, list) and lista else cfg.get("colchon"))
+
+
+def _cifras_colchon(c):
+    """Lo que pide un fondo: X meses de gastos o un importe fijo. None si no tiene sentido."""
     if not isinstance(c, dict):
         return None
     try:
@@ -2133,6 +2157,7 @@ def construir(cfg, carpeta, descargar=True, cache=None, historico=True):
         "objetivo": objetivo_propio(cfg),
         "objetivoReparto": reparto_objetivo(cfg),
         "colchon": colchon(cfg),
+        "colchones": colchones(cfg),
         "comisiones": comisiones,
         "rentabilidadAnual": rent_anual,
         "dividendos": resumen_dividendos(cfg.get("movimientos", []), productos + ser_otros, fecha_extracto),
