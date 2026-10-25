@@ -42,6 +42,7 @@ Todo pasa por una sola puerta (`app/red.py`), que solo deja **pedir** datos (nun
 | `lt.morningstar.com` | Precios, buscador y reparto por países y sectores de los fondos | El ISIN o el código de Morningstar, o lo que escribes en el buscador |
 | `api-global.morningstar.com` | Reparto por países y sectores de los planes de pensiones | El código de Morningstar del plan |
 | `api.coingecko.com` | Precio de criptomonedas | El nombre de la moneda (`bitcoin`) |
+| `servicios.ine.es` | Inflación de España (IPC general del INE) para la rentabilidad real | El código de la serie (`IPC290751`) |
 | `raw.githubusercontent.com` | Saber si hay una versión nueva | Nada |
 
 **Nunca sale** cuánto tienes, cuánto has puesto, cuántas participaciones, tus fechas de compra, el total de tu

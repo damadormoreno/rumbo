@@ -830,12 +830,15 @@ body.video .tarjetaCanal{display:none}
   <section class="tarjeta" id="seccionProyeccion" style="margin-top:16px">
     <header>
       <h2>Si sigo así…</h2>
-      <span class="subt">Proyección orientativa: rentabilidad constante, sin impuestos ni inflación</span>
+      <span class="subt" id="proySubt">Proyección orientativa: rentabilidad constante, sin impuestos ni inflación</span>
+      <div class="sep"></div>
+      <div class="segm" id="segProy"></div>
     </header>
     <div class="mandos">
       <div class="mando"><label>Años <b id="vAnos">15</b></label><input type="range" id="rAnos" min="1" max="40" value="15"></div>
       <div class="mando"><label>Rentabilidad anual <b id="vRent">7 %</b></label><input type="range" id="rRent" min="0" max="15" step="0.5" value="7"></div>
       <div class="mando"><label>Aportación mensual <b id="vApor">—</b></label><input type="range" id="rApor" min="0" max="3000" step="50" value="500"></div>
+      <div class="mando" id="mandoInf" hidden><label>Inflación anual <b id="vInf">2 %</b></label><input type="range" id="rInf" min="0" max="6" step="0.5" value="2"></div>
     </div>
     <div class="envGraf" id="grafProy"></div>
     <div class="hSub" id="proyResumen" style="margin-top:14px"></div>
@@ -983,8 +986,8 @@ body.video .tarjetaCanal{display:none}
       <p>La app actualiza los precios al abrirse si tienen más de 6 horas, y cuando pulsas <b>«↻ Actualizar precios»</b>. Si una fuente no responde, usa el último precio guardado y te avisa.</p></div></details>
 
     <details class="faq"><summary>¿Mis datos salen de mi ordenador?</summary><div>
-      <p>No. Todo se guarda en la carpeta <code>mis_datos</code>, dentro de la carpeta de la app. No hay cuentas, ni servidores, ni nadie más que los vea. La app solo sale a internet para descargar precios y el reparto de tus fondos, y en esas consultas no va ningún dato tuyo.</p>
-      <p>A internet solo salen <b>códigos de producto</b> (ISIN o ticker) para pedir precios y el reparto por países, y lo que escribes en el buscador. Nunca cuánto tienes, cuánto has puesto ni el total de tu patrimonio.</p>
+      <p>No. Todo se guarda en la carpeta <code>mis_datos</code>, dentro de la carpeta de la app. No hay cuentas, ni servidores, ni nadie más que los vea. La app solo sale a internet para descargar precios, el reparto de tus fondos y la inflación de España (el IPC del INE), y en esas consultas no va ningún dato tuyo.</p>
+      <p>A internet solo salen <b>códigos de producto</b> (ISIN o ticker) para pedir precios y el reparto por países, el código de la serie del IPC y lo que escribes en el buscador. Nunca cuánto tienes, cuánto has puesto ni el total de tu patrimonio.</p>
       <p>Y desde la 2.0, la app se abre con una <b>llave de acceso</b> que solo tiene el navegador que abrió el lanzador: ninguna otra web, otro programa ni otro usuario del ordenador puede ver ni cambiar tus datos. Por eso, si cierras la pestaña, vuelve a abrirla con el lanzador.</p></div></details>
 
     <details class="faq"><summary>¿Cómo meto mi cuenta del banco, un plan de pensiones o un piso?</summary><div>

@@ -383,10 +383,33 @@
     };
   }
 
+  /* ---------------------------------------------- «Si sigo así…» */
+  /**
+   * Proyección mes a mes con rentabilidad constante: cada mes crece rent/12 y entra la
+   * aportación. Con inflación (anual), todo va en euros de hoy: cada importe se divide
+   * por lo que han subido los precios hasta su mes, con el mismo criterio mensual.
+   */
+  function proyeccion({ valor, aportado, anos, rent, aporte, inflacion = 0, desde }) {
+    const n = anos * 12, rm = rent / 12, im = (inflacion || 0) / 12;
+    const [a0, m0] = desde.split("-").map(Number);
+    const fechas = [], valores = [], aportadoSerie = [];
+    let v = valor, ap = aportado, def = 1;
+    for (let i = 0; i <= n; i++) {
+      const mes = m0 - 1 + i;
+      fechas.push(`${a0 + Math.floor(mes / 12)}-${String(mes % 12 + 1).padStart(2, "0")}-01`);
+      valores.push(Math.round(v / def));
+      aportadoSerie.push(Math.round(ap));
+      def *= 1 + im;
+      v = v * (1 + rm) + aporte;
+      ap += aporte / def;
+    }
+    return { fechas, valores, aportado: aportadoSerie };
+  }
+
   return {
     leeImporte, xirr, metricas, agregaExposicion, esLiquidez, resumenLiquidez, resumenColchones,
     gruposReparto, filasReparto, repartirAportacion, normalizaReparto, tipoReparto, TIPOS_REPARTO,
     cuentaPorDefecto, cuentaEnReparto, FUERA_DE_BOLSA, periodicasPendientes,
-    resumenParaCompartir,
+    resumenParaCompartir, proyeccion,
   };
 });

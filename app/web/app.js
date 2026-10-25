@@ -101,6 +101,7 @@
     compRef: recuerda.lee("patrimonio.compRef") || "mundo",
     verVendidos: recuerda.lee("patrimonio.vendidos") === "1",
     moneda: recuerda.lee("patrimonio.moneda") || "EUR",
+    proyHoy: recuerda.lee("patrimonio.proyHoy") === "1",
     rangoFondo: "todo",
     rangoComp: "todo",
     ocultos: new Set(),
@@ -663,20 +664,24 @@
     $("#vAnos").textContent = anos;
     $("#vRent").textContent = $("#rRent").value.replace(".", ",") + " %";
     $("#vApor").textContent = G.fmtEur(apor, 0);
+    const deHoy = estado.proyHoy, inf = +$("#rInf").value / 100;
+    $("#vInf").textContent = $("#rInf").value.replace(".", ",") + " %";
+    $("#mandoInf").hidden = !deHoy;
+    $("#proySubt").textContent = deHoy
+      ? `Proyección orientativa: rentabilidad constante, sin impuestos, en euros de hoy (inflación del ${G.fmtPct(inf, 1)} al año)`
+      : "Proyección orientativa: rentabilidad constante, sin impuestos ni inflación";
+    pintaSegm($("#segProy"), [{ id: "nominal", et: "Euros de cada año" }, { id: "hoy", et: "Euros de hoy" }],
+      deHoy ? "hoy" : "nominal", id => {
+        estado.proyHoy = id === "hoy";
+        recuerda.guarda("patrimonio.proyHoy", estado.proyHoy ? "1" : "0");
+        pintaProyeccion();
+      });
 
     const m = metricas(visibles());
-    const rm = rent / 12, n = anos * 12;
-    const fechas = [], valores = [], aportado = [];
-    const base = new Date(D.fechaExtracto);
-    let v = m.valor, ap = m.aportado;
-    for (let i = 0; i <= n; i++) {
-      const f = new Date(base.getFullYear(), base.getMonth() + i, 1);
-      fechas.push(f.toISOString().slice(0, 10));
-      valores.push(Math.round(v));
-      aportado.push(Math.round(ap));
-      v = v * (1 + rm) + apor;
-      ap += apor;
-    }
+    const { fechas, valores, aportado } = C.proyeccion({
+      valor: m.valor, aportado: m.aportado, anos, rent, aporte: apor,
+      inflacion: deHoy ? inf : 0, desde: D.fechaExtracto,
+    });
     G.lineaConEventos($("#grafProy"), {
       fechas, valores, color: G.css("--s3"), alto: 250,
       overlay: { nombre: "Habré aportado", valores: aportado },
@@ -684,10 +689,10 @@
     const fin = valores[valores.length - 1], apFin = aportado[aportado.length - 1];
     $("#proyResumen").innerHTML =
       `Partiendo de ${G.fmtEur(m.valor, 0)}${filtrando() ? " (vista filtrada)" : ""},
-       en <b class="fuerte">${anos} años</b> tendrías <b class="fuerte">${G.fmtEur(fin, 0)}</b>
+       en <b class="fuerte">${anos} años</b> tendrías <b class="fuerte">${G.fmtEur(fin, 0)}</b>${deHoy ? " de hoy" : ""}
        <span style="color:var(--tinta3)">·</span> habrías aportado ${G.fmtEur(apFin, 0)}
        <span style="color:var(--tinta3)">·</span> el mercado pondría
-       <span class="pos fuerte">${G.fmtEur(fin - apFin, 0)}</span>`;
+       <span class="${fin >= apFin ? "pos" : "neg"} fuerte">${G.fmtEur(fin - apFin, 0)}</span>`;
   }
 
   function pintaTabla() {
@@ -1192,14 +1197,31 @@
   function pintaRendimiento() {
     const ra = D.rentabilidadAnual;
     if (ra && ra.anos.length) {
-      G.barrasSimples($("#grafAnual"), {
-        categorias: ra.anos.map((a, i) => a + (ra.parcial[i] ? " *" : "")),
-        valores: ra.cartera, alto: 240,
-        color: G.css("--s1"),
-        colores: ra.cartera.map(v => v >= 0 ? G.css("--s1") : G.css("--s2")),
-      });
-      $("#notaAnual").textContent =
-        "Tu cartera completa, limpia del efecto de cuándo metiste el dinero. * año incompleto.";
+      const categorias = ra.anos.map((a, i) => a + (ra.parcial[i] ? " *" : ""));
+      // La real solo aparece si hay IPC del INE (descargado o guardado); si no, todo sigue como antes.
+      const hayReal = (ra.real || []).some(v => v != null);
+      if (hayReal) {
+        const cNom = G.css("--s1"), cReal = G.css("--s3");
+        G.barrasAgrupadas($("#grafAnual"), {
+          categorias, alto: 240, sinTotal: true,
+          series: [{ nombre: "Nominal", valores: ra.cartera, color: cNom },
+            { nombre: "Real (descontada la inflación)", valores: ra.real, color: cReal }],
+          formatoY: v => G.fmtPct(v, 0), formatoValor: v => G.fmtPctSigno(v, 1),
+        });
+        $("#notaAnual").innerHTML =
+          `Tu cartera completa, limpia del efecto de cuándo metiste el dinero.
+           <i class="pt" style="background:${cNom}"></i>Nominal
+           <i class="pt" style="background:${cReal}"></i>Real, descontada la inflación de España
+           (IPC del INE${ra.ipcHasta ? `, publicado hasta ${G.fmtMes(ra.ipcHasta)}` : ""}). * año incompleto.`;
+      } else {
+        G.barrasSimples($("#grafAnual"), {
+          categorias, valores: ra.cartera, alto: 240,
+          color: G.css("--s1"),
+          colores: ra.cartera.map(v => v >= 0 ? G.css("--s1") : G.css("--s2")),
+        });
+        $("#notaAnual").textContent =
+          "Tu cartera completa, limpia del efecto de cuándo metiste el dinero. * año incompleto.";
+      }
 
       // Solo TU rentabilidad, por producto y año.
       $("#notaTablaAnual").textContent =
@@ -1215,6 +1237,9 @@
         : `<td class="${v >= 0 ? "pos" : "neg"}">${G.fmtPctSigno(v, 1)}` +
           `${d ? `<span class="subt" style="font-weight:400"> · desde ${corto(d)}</span>` : ""}</td>`;
       const prods = D.productos.filter(p => tabla[p.id]);
+      const filaPie = (nombre, vals, neutra) => `<tr><td>${nombre}</td>${vals.map(v => v == null
+        ? `<td class="subt">—</td>`
+        : `<td class="${neutra ? "" : v >= 0 ? "pos" : "neg"}">${G.fmtPctSigno(v, 1)}</td>`).join("")}</tr>`;
       $("#tablaAnual").innerHTML =
         `<thead><tr><th>Producto</th>${ra.anos.map((a, i) =>
           `<th>${a}${ra.parcial[i] ? " *" : ""}</th>`).join("")}</tr></thead>
@@ -1222,8 +1247,8 @@
            <td><i class="pt" style="background:${color(p)}"></i>${p.corto}</td>
            ${tabla[p.id].map((v, i) => celda(v, (desde[p.id] || [])[i], ((ra.vendido || {})[p.id] || [])[i])).join("")}
          </tr>`).join("")}</tbody>` +
-        (verProducto ? "" : `<tfoot><tr><td>Tu cartera</td>${ra.cartera.map(v =>
-          `<td class="${v == null ? "" : v >= 0 ? "pos" : "neg"}">${G.fmtPctSigno(v, 1)}</td>`).join("")}</tr></tfoot>`);
+        (verProducto ? "" : `<tfoot>${filaPie("Tu cartera", ra.cartera)}${hayReal
+          ? filaPie("Inflación (IPC)", ra.inflacion, true) + filaPie("Tu cartera, real", ra.real) : ""}</tfoot>`);
     }
 
     pintaComparacion();
@@ -1583,7 +1608,7 @@
   $("#mesSel").onchange = e => { estado.mes = +e.target.value; pintaMes(); };
   $("#mesPrev").onclick = () => { estado.mes = Math.max(0, estado.mes - 1); pintaMes(); };
   $("#mesNext").onclick = () => { estado.mes = Math.min(D.resumenMensual.length - 1, estado.mes + 1); pintaMes(); };
-  ["rAnos", "rRent", "rApor"].forEach(id => $("#" + id).addEventListener("input", pintaProyeccion));
+  ["rAnos", "rRent", "rApor", "rInf"].forEach(id => $("#" + id).addEventListener("input", pintaProyeccion));
   $("#rApor").value = Math.min(3000, Math.max(0, Math.round((D.total.ritmoMensual || 500) / 50) * 50));
 
   document.addEventListener("keydown", e => {

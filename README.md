@@ -84,6 +84,7 @@ Todo lo que pedisteis en los comentarios del vídeo y en GitHub, por orden de im
 - **Precios automáticos** de Morningstar, Yahoo Finance y CoinGecko, con conversión a euros.
 - **Buscador por ISIN, ticker o nombre** que comprueba que el producto tiene precio antes de guardarlo y rellena solo la comisión (TER), el riesgo y la categoría.
 - **Cifras honestas**: aportado, plusvalía, **TIR** (la rentabilidad real de tu dinero), rentabilidad por año, peor caída, racha de aportaciones…
+- **Descontando la inflación**: cada año, junto a la rentabilidad nominal, la real (con el IPC de España que publica el INE), y la proyección «Si sigo así…» en euros de hoy.
 - **Comparación con un indexado**: con tus mismas aportaciones, ¿cuánto tendrías en el MSCI World, el S&P 500 o una cartera 60/40?
 - **Traspasos entre fondos y planes**: el coste y la antigüedad pasan al nuevo, como hace Hacienda, sin contar como venta.
 - **Perfiles**: la cartera de tu pareja o de tus hijos, cada una aparte, y **«Todos juntos»** para ver la suma.
@@ -608,7 +609,7 @@ Lee el mensaje de la ventana: casi siempre dice qué pasa. Lo más habitual es n
 ## Privacidad
 
 - Tus datos se guardan **solo en tu ordenador**, en la carpeta `mis_datos`. No hay cuentas, ni servidores, ni nadie más que los vea.
-- **A internet solo salen códigos de producto** (ISIN, ticker o el de Morningstar) para pedir precios y el reparto por países, y lo que escribes en el buscador. **Nunca** cuánto tienes, cuánto has puesto, tus participaciones ni el total de tu patrimonio. Todo pasa por una sola puerta que solo deja pedir datos a Yahoo Finance, Morningstar, CoinGecko y GitHub.
+- **A internet solo salen códigos de producto** (ISIN, ticker o el de Morningstar) para pedir precios y el reparto por países, el código de la serie del IPC para pedir la inflación, y lo que escribes en el buscador. **Nunca** cuánto tienes, cuánto has puesto, tus participaciones ni el total de tu patrimonio. Todo pasa por una sola puerta que solo deja pedir datos a Yahoo Finance, Morningstar, CoinGecko, el INE (Instituto Nacional de Estadística) y GitHub.
 - El servidor de la app solo escucha en tu propio ordenador (`127.0.0.1`): nadie de tu red puede entrar.
 - **Llave de acceso** (desde la 2.0): el lanzador abre la app con una llave que solo tiene tu navegador. Ni otra web abierta en tu navegador, ni otro programa, ni otro usuario del ordenador pueden ver ni cambiar tus datos. Por eso, si cierras la pestaña, vuelve a abrirla con el lanzador.
 - Todos los detalles, en [docs/SEGURIDAD.md](docs/SEGURIDAD.md).

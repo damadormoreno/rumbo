@@ -85,10 +85,13 @@ class PreciosInventados:
     Sustituye las descargas del motor por series fijas. Lo que no se indique en
     'series' se inventa a partir del nombre del símbolo (siempre el mismo valor).
     Uso:  with PreciosInventados({"AAPL": {...}}): motor.construir(...)
+    El IPC del INE es 'ipc' ({"2024-12": 98.4, ...}; sin él, no hay); con ipc_de_verdad,
+    se usa descargar_ipc tal cual (y sus propios parches de red).
     """
 
-    def __init__(self, series=None):
+    def __init__(self, series=None, ipc=None, ipc_de_verdad=False):
         self.series = dict(series or {})
+        self.ipc, self.ipc_de_verdad = dict(ipc or {}), ipc_de_verdad
         self.pedidos = []
 
     def serie(self, clave):
@@ -108,6 +111,8 @@ class PreciosInventados:
             mock.patch.object(motor, "descargar_morningstar", lambda s, *a, **k: self.serie("MS:" + s)),
             mock.patch.object(motor, "descargar_coingecko", lambda s, *a, **k: self.serie("CG:" + s)),
         ]
+        if not self.ipc_de_verdad:
+            self._parches.append(mock.patch.object(motor, "descargar_ipc", lambda: dict(self.ipc)))
         for p in self._parches:
             p.start()
         return self

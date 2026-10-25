@@ -488,6 +488,79 @@ def descargar_coingecko(coin, dias=365):
     return previo
 
 
+# ---------------------------------------------------------------- INE (inflación)
+
+# IPC general de España, índice mensual, base 2025 (enlazado por el INE desde enero de
+# 2002). Cuando el INE cambie de base, la serie tendrá otro código: con él cambia también
+# el archivo de la cache, para no mezclar índices de bases distintas.
+IPC_SERIE = "IPC290751"
+IPC_MARGEN_DIAS = 62   # el INE publica cada mes a mediados del siguiente
+
+
+def descargar_ipc():
+    """{"AAAA-MM": índice} del IPC del INE, con cache en disco. A internet solo va el código de
+    la serie. Si falla, se usa lo guardado; sin nada guardado, el panel oculta lo «real»."""
+    os.makedirs(CACHE, exist_ok=True)
+    ruta = os.path.join(CACHE, f"INE_{IPC_SERIE}.json")
+    previo = lee_cache(ruta)
+    if SIN_RED or (SOLO_FALTAN and previo):
+        return previo
+    url = f"https://servicios.ine.es/wstempus/js/ES/DATOS_SERIE/{IPC_SERIE}?nult=1000"
+    try:
+        with red.abrir(url, UA, timeout=30) as resp:
+            datos = json.loads(resp.read().decode("utf-8", "replace"))
+        nuevo = {}
+        for fila in datos.get("Data") or []:
+            ano, mes, v = fila.get("Anyo"), fila.get("FK_Periodo"), fila.get("Valor")
+            if isinstance(ano, int) and isinstance(mes, int) and 1 <= mes <= 12 and v is not None:
+                nuevo[f"{ano:04d}-{mes:02d}"] = float(v)
+        if nuevo:
+            previo.update(nuevo)
+            guarda_cache(ruta, previo)
+            print(f"  OK  INE {IPC_SERIE:16s} {len(nuevo):5d} meses  ultimo {max(nuevo)} = {nuevo[max(nuevo)]:.3f}")
+        else:
+            print(f"  --  INE {IPC_SERIE}: sin datos, uso el IPC guardado.")
+    except Exception as e:
+        # Sin aviso en el panel: la inflación es un extra y lo «real» simplemente no se muestra.
+        print(f"  --  INE {IPC_SERIE}: no responde ({type(e).__name__}), uso el IPC guardado.")
+    return previo
+
+
+def nivel_ipc(ipc, fecha):
+    """Nivel de precios en un día. El índice de cada mes vale para su último día y entre
+    meses se interpola. Los días aún sin publicar toman el último mes, salvo que la cache
+    esté tan atrasada que eso sería inventarse la inflación."""
+    if not ipc:
+        return None
+    f = d(fecha) if isinstance(fecha, str) else fecha
+    mes = f"{f.year:04d}-{f.month:02d}"
+    ultimo = max(ipc)
+    if mes > ultimo:
+        a, m = int(ultimo[:4]), int(ultimo[5:])
+        fin_ultimo = dt.date(a + m // 12, m % 12 + 1, 1) - dt.timedelta(days=1)
+        return ipc[ultimo] if (f - fin_ultimo).days <= IPC_MARGEN_DIAS else None
+    dias_mes = (dt.date(f.year + f.month // 12, f.month % 12 + 1, 1) - dt.timedelta(days=1)).day
+    if f.day == dias_mes:
+        return ipc.get(mes)
+    ant = (f.replace(day=1) - dt.timedelta(days=1)).strftime("%Y-%m")
+    if ant not in ipc or mes not in ipc:
+        return None
+    return ipc[ant] + (ipc[mes] - ipc[ant]) * f.day / dias_mes
+
+
+def inflacion_entre(ipc, desde, hasta):
+    """Lo que han subido los precios entre dos días (0.03 = un 3 %), o None sin datos."""
+    a, b = nivel_ipc(ipc, desde), nivel_ipc(ipc, hasta)
+    return b / a - 1 if a and b else None
+
+
+def rent_real(nominal, inflacion):
+    """Rentabilidad descontada la inflación del mismo periodo: (1 + nominal) / (1 + inflación) - 1."""
+    if nominal is None or inflacion is None:
+        return None
+    return (1 + nominal) / (1 + inflacion) - 1
+
+
 # ---------------------------------------------------------------- modelo
 
 TIPOS = {
@@ -1400,6 +1473,7 @@ def construir(cfg, carpeta, descargar=True, cache=None, historico=True):
         for sim in {s for r in REFERENCIAS.values() for s, _ in r["piezas"]}:
             if sim not in series:
                 series[sim] = descargar_serie(sim)
+    ipc = descargar_ipc() if productos_cfg else {}
 
     ajustados = {}
     movimientos_de, movs_por, vals_por = fifo_cartera(cfg, productos_cfg, splits=ajustados)
@@ -1998,7 +2072,10 @@ def construir(cfg, carpeta, descargar=True, cache=None, historico=True):
     # cuenta desde tu primera compra.
     idx_prod = {p["id"]: indice_twr(p["serie"], flujo_prod[p["id"]]) for p in inv}
     anos_nat = sorted({f[:4] for f in eje_iso})
+    # La real descuenta la inflación del mismo periodo: el año natural, o desde el primer
+    # día con cartera y hasta la fecha de los datos en los años incompletos.
     rent_anual = {"anos": anos_nat, "cartera": [], "parcial": [],
+                  "inflacion": [], "real": [], "ipcHasta": max(ipc) if ipc else None,
                   "porProducto": {p["id"]: [] for p in inv},
                   "desde": {p["id"]: [] for p in inv},
                   "vendido": {p["id"]: [] for p in inv}}
@@ -2009,8 +2086,13 @@ def construir(cfg, carpeta, descargar=True, cache=None, historico=True):
         fin = max(i for i, f in enumerate(eje_iso) if f[:4] == ano)
         base_ano = ini - 1 if ini > 0 else None
         b = idx_cartera[base_ano] if base_ano is not None else 100.0
-        rent_anual["cartera"].append(r4(idx_cartera[fin] / b - 1) if b else None)
+        nominal = idx_cartera[fin] / b - 1 if b else None
+        rent_anual["cartera"].append(r4(nominal))
         rent_anual["parcial"].append(ano in (anos_nat[0], anos_nat[-1]))
+        inf = inflacion_entre(ipc, eje_iso[ini] if base_ano is None else f"{int(ano) - 1}-12-31",
+                              eje_iso[fin] if ano == anos_nat[-1] else f"{ano}-12-31")
+        rent_anual["inflacion"].append(r4(inf))
+        rent_anual["real"].append(r4(rent_real(nominal, inf)))
         for p in inv:
             i0 = primer_dia[p["id"]]
             if i0 is None or i0 > fin:

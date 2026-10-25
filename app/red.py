@@ -3,9 +3,10 @@
 red.py  ·  La única puerta de Rumbo a internet
 ==============================================
 Todo lo que la app descarga pasa por aquí. Solo se puede hablar con estos sitios, solo
-por https y solo para PEDIR datos (GET, sin cuerpo): precios, el reparto de un fondo y
-si hay una versión nueva. En esas peticiones va como mucho el código del producto
-(ISIN, ticker o el de Morningstar) o lo que escribes en el buscador; nunca cuánto tienes,
+por https y solo para PEDIR datos (GET, sin cuerpo): precios, el reparto de un fondo, la
+inflación y si hay una versión nueva. En esas peticiones va como mucho el código del
+producto (ISIN, ticker o el de Morningstar), el de la serie del IPC del INE o lo que
+escribes en el buscador; nunca cuánto tienes,
 cuánto has puesto ni ningún otro dato de tu cartera.
 """
 
@@ -18,6 +19,7 @@ PERMITIDOS = {
     "lt.morningstar.com": "precios, buscador y cartera de los fondos (Morningstar)",
     "api-global.morningstar.com": "cartera de los planes de pensiones (Morningstar)",
     "api.coingecko.com": "precios de criptomonedas (CoinGecko)",
+    "servicios.ine.es": "inflación de España: el IPC general del INE, para la rentabilidad real",
     "raw.githubusercontent.com": "comprobar si hay una versión nueva de Rumbo",
 }
 

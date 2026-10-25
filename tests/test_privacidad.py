@@ -221,6 +221,7 @@ class LoQueSaleAInternet(ConCarpeta):
         self.assertGreater(len(self.salidas), 10)
         hosts = {urllib.parse.urlsplit(s["url"]).hostname for s in self.salidas}
         self.assertLessEqual(hosts, set(red.PERMITIDOS), hosts - set(red.PERMITIDOS))
+        self.assertIn("servicios.ine.es", hosts)      # la inflación también se pide
         cifras = ("73519", "7351937", "98.7654", "98,7654", "41267", "5555", "3333", "999.11", "0.123456")
         for s in self.salidas:
             with self.subTest(url=s["url"]):
@@ -232,6 +233,16 @@ class LoQueSaleAInternet(ConCarpeta):
                     self.assertNotIn(c, s["url"])
                 for nombre in ("Mi fondo World", "Mi ETF", "Mi+fondo", "Mi%20fondo"):
                     self.assertNotIn(nombre, s["url"])   # ni siquiera los nombres que tú pones
+
+    def test_al_ine_solo_va_el_codigo_de_la_serie_del_ipc(self):
+        cfg = cartera([{"id": "e", "nombre": "Mi ETF", "tipo": "etf", "fuente": "yahoo", "codigo": "IWDA.AS",
+                        "moneda": "EUR", "slot": 1}],
+                      [mov("2024-01-02", "e", "compra", self.UNIDADES, self.IMPORTE)])
+        motor.construir(cfg, self.carpeta, descargar=True)
+        al_ine = [s["url"] for s in self.salidas if urllib.parse.urlsplit(s["url"]).hostname == "servicios.ine.es"]
+        self.assertEqual(al_ine, [f"https://servicios.ine.es/wstempus/js/ES/DATOS_SERIE/{motor.IPC_SERIE}?nult=1000"])
+        self.assertRegex(motor.IPC_SERIE, r"^IPC\d+$")
+        self.assertIn("INE", red.PERMITIDOS["servicios.ine.es"])
 
     def test_la_puerta_no_deja_salir_a_otro_sitio(self):
         for url in ("http://lt.morningstar.com/x", "https://evil.com/robar?datos=1", "ftp://raw.githubusercontent.com/x",
