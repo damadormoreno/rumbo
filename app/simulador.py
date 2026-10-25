@@ -40,7 +40,10 @@ TRAMOS_AHORRO = (
 COMPENSACION_CRUZADA = 0.25
 # Por debajo de esta parte de ganancia sobre lo vendido, se dice que tiene «poca plusvalía».
 POCA_PLUSVALIA = 0.10
-FUERA = ("efectivo", "deuda", "pension")   # cuentas, deudas y planes: no se venden en bolsa
+# Cuentas, deudas, planes de pensiones (un rescate es rendimiento del trabajo), pisos (su venta
+# tiene sus propias reglas) y préstamos P2P (se devuelven, no se venden): no entran.
+FUERA = ("efectivo", "deuda", "pension", "inmueble", "p2p")
+MAXIMO = 1e12   # más que esto no es una cantidad, es una errata
 
 AVISO = ("Estimación orientativa, no asesoramiento fiscal. Ventas como Hacienda (FIFO; los traspasos entre fondos "
          "conservan coste y fecha) al valor de hoy y sin comisiones. Cuenta lo que ya vendiste y cobraste este año, pero "
@@ -123,6 +126,8 @@ def simular(cfg, valores, producto=None, euros=None, unidades=None, hoy=None, ca
     else:
         unidades = None
         euros = almacen.numero(euros, "cuántos euros quieres sacar", errores, mayor_que=0)
+    if any(x is not None and not x < MAXIMO for x in (euros, unidades)):
+        errores.append("Esa cantidad es demasiado grande: revísala.")
     if errores:
         raise almacen.ErrorValidacion(errores)
 
@@ -153,7 +158,7 @@ def simular(cfg, valores, producto=None, euros=None, unidades=None, hoy=None, ca
             if tenias <= 1e-9:
                 raise almacen.ErrorValidacion([f"«{nombre(producto)}» no tiene participaciones: indica cuántos euros "
                                                "quieres sacar."])
-            if unidades > tenias and unidades - tenias <= max(1e-4, tenias * 1e-6):
+            if unidades > tenias and unidades - tenias <= tenias * 1e-6 + 1e-12:
                 unidades = tenias   # todo: los últimos decimales no se pueden escribir exactos
             if unidades > tenias + 1e-9:
                 raise almacen.ErrorValidacion([f"De «{nombre(producto)}» solo tienes {almacen.fmt_unidades(tenias)} "
@@ -202,9 +207,11 @@ def simular(cfg, valores, producto=None, euros=None, unidades=None, hoy=None, ca
         o["perdidaDiferida"] = o["ganancia"] < 0 and bool(_compra_reciente(cfg, p, hoy))
         base = base_ahorro(gan_previas + (0 if o["perdidaDiferida"] else o["ganancia"]), rend_previos)
         o["impuesto"] = r2(cuota_ahorro(base) - cuota_previa)
-        o["tipoMarginal"] = tipo_marginal(base) if o["ganancia"] > 0 else None
+        o["tipoMarginal"] = tipo_marginal(base) if o["impuesto"] > 0 else None
         o["avisos"] += _avisos(cfg, p, o, hoy)
-    opciones.sort(key=lambda o: (not o["alcanza"], o.get("impuesto", 0), o.get("ganancia", 0), o["nombre"]))
+    # A igual IRPF, mejor una pérdida que compensa (o se arrastra) que una diferida, y luego la menor ganancia.
+    opciones.sort(key=lambda o: (not o["alcanza"], o.get("impuesto", 0), o.get("perdidaDiferida", False),
+                                 o.get("ganancia", 0), o["nombre"]))
 
     validas = [o for o in opciones if o["alcanza"]]
     mejor = validas[0] if validas else None
@@ -265,14 +272,15 @@ def _porque(mejor, elegida, euros, ahorro):
                   if mejor["impuesto"] < 0 else
                   "así que no pagas nada (y esa pérdida compensa ganancias de este año o de los cuatro siguientes)."))
     elif g / euros <= POCA_PLUSVALIA:
-        txt = (f"«{n}» tiene poca plusvalía: solo el {pct(g / euros)} de lo que vendes es ganancia (lo que saldría se "
-               "compró a un precio parecido al de hoy, como pasa con un monetario).")
+        txt = (f"«{n}» tiene poca plusvalía: solo el {pct(g / euros)} de lo que vendes es ganancia (lo que saldría "
+               "costó casi lo que vale hoy, como suele pasar con un monetario).")
     else:
         txt = f"«{n}» es el que menos ganancia tiene por euro vendido: el {pct(g / euros)} de lo que sacas."
     if elegida and elegida is not mejor:
         if elegida["alcanza"] and ahorro > 0:
-            txt += (f" Sacar lo mismo de «{elegida['nombre']}» supondría {eur(elegida['impuesto'])} de IRPF: "
-                    f"{eur(ahorro)} más.")
+            txt += (f" Sacar lo mismo de «{elegida['nombre']}» " +
+                    (f"supondría {eur(elegida['impuesto'])} de IRPF: {eur(ahorro)} más." if elegida["impuesto"] >= 0
+                     else f"te ahorraría {eur(-elegida['impuesto'])}: {eur(ahorro)} menos."))
         elif elegida["alcanza"]:
             txt += f" Sacarlo de «{elegida['nombre']}» te costaría lo mismo."
     elif elegida:

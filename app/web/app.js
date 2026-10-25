@@ -1450,8 +1450,10 @@
     // Como «Para la Renta»: se calcula en el servidor, así que en la web publicada no sale.
     sec.hidden = !window.Editor;
     if (sec.hidden) return;
-    // Lo que se puede vender: ni cuentas, ni deudas, ni planes de pensiones (un rescate no es una venta).
-    const vendibles = D.productos.filter(p => (p.valor || 0) > 0.005 && !["efectivo", "deuda", "pension"].includes(p.tipoClave));
+    // Lo que se puede vender (como simulador.FUERA): ni cuentas, ni deudas, ni planes de pensiones (un
+    // rescate no es una venta), ni pisos ni préstamos P2P.
+    const vendibles = D.productos.filter(p => (p.valor || 0) > 0.005 &&
+      !["efectivo", "deuda", "pension", "inmueble", "p2p"].includes(p.tipoClave));
     if (SIM.producto === null) SIM.producto = vendibles.some(p => p.id === estado.fondo) ? estado.fondo : "";
     if (SIM.producto && !vendibles.some(p => p.id === SIM.producto)) SIM.producto = "";
     if (SIM.modo === "unidades" && !SIM.producto) SIM.modo = "euros";
@@ -1460,6 +1462,8 @@
       if (id === "unidades" && !SIM.producto && vendibles.length) SIM.producto = vendibles[0].id;
       pintaSimulador();
     });
+    // Decimales con coma, como en el resto de la app: «0.125» se leería como 125.
+    $("#simCantidad").placeholder = SIM.modo === "euros" ? "5.000" : "0,5";
     const sel = $("#simProducto");
     sel.innerHTML = (SIM.modo === "euros" ? `<option value="">cualquiera (los comparo todos)</option>` : "") +
       vendibles.map(p => `<option value="${escH(p.id)}">${escH(p.corto || p.nombre)}</option>`).join("");

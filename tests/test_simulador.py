@@ -4,7 +4,7 @@ import os
 from unittest import mock
 
 from comun import ConCarpeta, cartera, etf, guarda_cache_yahoo, manual, mov
-from app import almacen, servidor, simulador
+from app import almacen, fiscal, servidor, simulador
 from test_splits import IMP_ANTES, IMP_DESPUES, SERIE, SPLITS, compras
 from test_staking import btc, staking
 
@@ -226,6 +226,53 @@ class AvisosYProductos(ConCarpeta):
         self.assertTrue(any("dos meses" in a for a in o["avisos"]), o["avisos"])
         self.assertEqual(o["impuesto"], 0)            # esa pérdida aún no compensa: no ahorra nada
         self.assertIn("todavía", res["porque"])
+
+
+class Revision(ConCarpeta):
+    def test_coincide_con_la_renta_si_haces_la_venta(self):
+        cfg = cartera([etf("a"), etf("x", "X.DE")], [
+            mov("2024-01-10", "a", "compra", 100, 1000), mov("2025-01-10", "a", "compra", 100, 1500),
+            mov("2025-03-01", "x", "compra", 10, 1000), mov("2026-03-01", "x", "venta", 10, 6000)])
+        o = opcion(simula(cfg, {"a": 4000}, producto="a", euros=3000), "a")
+        antes = fiscal.informe(cfg, "2026", HOY)["totales"]["saldo"]
+        cfg["movimientos"].append(mov(HOY.isoformat(), "a", "venta", o["unidades"], 3000))
+        despues = fiscal.informe(cfg, "2026", HOY)["totales"]["saldo"]
+        self.assertEqual(round(despues - antes, 2), o["ganancia"])
+        self.assertEqual(round(simulador.cuota_ahorro(despues) - simulador.cuota_ahorro(antes), 2), o["impuesto"])
+
+    def test_una_perdida_que_no_compensa_pierde_el_empate(self):
+        cfg = cartera([etf("a"), etf("b", "B.DE")], [
+            mov("2026-10-01", "a", "compra", 100, 2000),     # comprado hace poco: su pérdida se difiere
+            mov("2025-01-10", "b", "compra", 100, 2000)])
+        res = simula(cfg, {"a": 1500, "b": 1800}, euros=600)   # a: -200 (diferida); b: -66,67
+        self.assertEqual((opcion(res, "a")["impuesto"], opcion(res, "b")["impuesto"]), (0, 0))
+        self.assertEqual(res["mejor"], "b")
+
+    def test_pisos_y_p2p_fuera(self):
+        cfg = cartera([etf("a"), manual("piso"), manual("p2", tipo="p2p")], [
+            mov("2024-01-10", "a", "compra", 100, 1000), mov("2024-01-10", "piso", "compra", 0, 100000),
+            mov("2024-01-10", "p2", "compra", 0, 1000)])
+        res = simula(cfg, {"a": 2000, "piso": 150000, "p2": 1010}, euros=500)
+        self.assertEqual([o["producto"] for o in res["opciones"]], ["a"])
+
+    def test_cantidades_pequenas_de_cripto(self):
+        cfg = cartera([btc()], [mov("2025-01-10", "btc", "compra", 0.00005, 3)])
+        with self.assertRaises(almacen.ErrorValidacion):
+            simula(cfg, {"btc": 5}, producto="btc", unidades=0.0001)     # el doble de lo que tienes
+        o = opcion(simula(cfg, {"btc": 5}, producto="btc", unidades=0.00005), "btc")
+        self.assertEqual(o["ganancia"], 2)
+
+    def test_numeros_imposibles(self):
+        cfg = cartera([etf("a")], [mov("2024-01-10", "a", "compra", 100, 1000)])
+        with self.assertRaises(almacen.ErrorValidacion):
+            simula(cfg, {"a": 2000}, euros="9" * 400)
+
+    def test_sin_impuesto_no_hay_tipo_marginal(self):
+        cfg = cartera([etf("a"), etf("x", "X.DE")], [
+            mov("2024-01-10", "a", "compra", 100, 1000),
+            mov("2025-03-01", "x", "compra", 10, 3000), mov("2026-03-01", "x", "venta", 10, 2000)])   # -1.000
+        o = opcion(simula(cfg, {"a": 2000}, producto="a", euros=1000), "a")     # +500, que compensa
+        self.assertEqual((o["ganancia"], o["impuesto"], o["tipoMarginal"]), (500, 0, None))
 
 
 class Staking(ConCarpeta):
