@@ -733,6 +733,11 @@ def api_importar_previsualizar():
             if not archivos:
                 return jsonify(ok=False, errores=["Elige los archivos CSV que has descargado de MyInvestor."]), 400
             plan = importar.preparar_myinvestor(cfg, archivos, DATOS)
+        elif origen == "bit2me" or (archivos and all(importar.es_bit2me(n, c) for n, c in archivos)):
+            # El extracto de Bit2Me se reconoce aunque se suba como plantilla.
+            if not archivos:
+                return jsonify(ok=False, errores=["Elige los extractos «summary-AAAA.xlsx» que has descargado de Bit2Me."]), 400
+            plan = importar.preparar_bit2me(cfg, archivos, DATOS)
         else:
             if not archivos and not texto:
                 return jsonify(ok=False, errores=["Elige un archivo o pega el texto que te ha dado la IA."]), 400

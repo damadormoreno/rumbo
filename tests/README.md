@@ -22,6 +22,7 @@ Si todo va bien, termina con `OK`. Las cuentas del navegador y la imagen de «Co
 | `test_motor.py` | FIFO, TIR, divisas, valores a mano y la **cartera de ejemplo** (que no cambie nada). |
 | `test_almacen.py` | Validaciones en castellano, colores, copias automáticas. |
 | `test_importar.py` | CSV de MyInvestor (con traspasos), plantilla Excel/CSV, texto de la IA, duplicados. |
+| `test_bit2me.py` | Extracto de Bit2Me (sintético): cabecera con tildes rotas, staking, compras y ventas con comisión, permutas, ingresos de euros y por blockchain, reimportar y años que se solapan sin duplicar. |
 | `test_red.py` | Internet simulado: precios diarios y splits de Yahoo, reintentos, mensajes sin conexión. |
 | `test_splits.py` | Splits: las participaciones de antes del split cuentan como las de después (valor, rentabilidad, ventas, traspasos, Renta y «Vender todo»), sin ajustar dos veces las que ya corregiste a mano. Si Yahoo no da el split, se deduce del precio de tus movimientos (también en otra moneda) y avisa de los que no cuadran con el de mercado. |
 | `test_servidor.py` | La app de verdad con una carpeta temporal: demo, guardar, copias, web sin importes. |
