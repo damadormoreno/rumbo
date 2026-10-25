@@ -635,7 +635,7 @@ body.video .tarjeta{padding:22px 24px}
 .pildoras.una{grid-template-columns:1fr}
 .progPie .editar{border:0;background:none;color:var(--s1);font:inherit;font-size:12.5px;cursor:pointer;padding:0 0 0 8px}
 .selPerfil{font-weight:600;color:var(--tinta);max-width:190px}
-body.video .selPerfil,body.video #bannerTodos,body.video #seccionFiscal,body.video #btnCompartir{display:none}
+body.video .selPerfil,body.video #bannerTodos,body.video #seccionFiscal,body.video #seccionSimular,body.video #btnCompartir{display:none}
 .modal.cmpModal{width:min(760px,calc(100vw - 24px))}
 .lotesTraspaso{display:grid;gap:10px;margin-top:12px}
 .loteTraspaso{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px 16px;padding:10px 12px;border:1px solid var(--borde);border-radius:11px}
@@ -661,7 +661,18 @@ body.video .selPerfil,body.video #bannerTodos,body.video #seccionFiscal,body.vid
   font-size:13px;line-height:1.5;color:var(--tinta2)}
 .fiscalAviso b{color:var(--tinta)}
 .fiscalRevisar{display:block;color:var(--tinta3);font-size:12px;line-height:1.4;margin-top:4px;white-space:normal}
-#seccionFiscal h3{font-size:15px;margin:22px 0 8px}
+#seccionFiscal h3,#seccionSimular h3{font-size:15px;margin:22px 0 8px}
+.simForm{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;margin:0 0 18px;font-size:14px;color:var(--tinta2)}
+.simForm input,.simForm select{background:var(--sup);color:var(--tinta);border:1px solid var(--borde);border-radius:9px;
+  padding:8px 12px;font:inherit;font-size:14px;max-width:100%}
+.simForm input{width:120px;margin-left:6px}
+.simForm select{margin-left:6px}
+.simPorque{font-size:14.5px;line-height:1.5;color:var(--tinta);margin:0 0 12px}
+.simEtq{font-size:10.5px;font-weight:700;color:var(--bien);border:1px solid var(--bien);border-radius:999px;padding:0 6px;margin-left:6px;white-space:nowrap}
+.simEtq.simElegido{color:var(--tinta3);border-color:var(--tinta3)}
+.simMejor td{background:var(--sup2)}
+.simLotes{margin-top:10px}
+.simLotes summary{cursor:pointer;font-size:13.5px;color:var(--tinta2);padding:4px 0}
 .perfilFila{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--borde)}
 .perfilFila small{color:var(--tinta3)}
 .listaNovedades{margin:10px 0 4px;padding-left:20px;line-height:1.6;color:var(--tinta2)}
@@ -941,6 +952,20 @@ body.video .tarjetaCanal{display:none}
     </header>
     <div id="fiscal"></div>
   </section>
+
+  <section class="tarjeta" id="seccionSimular" hidden>
+    <header>
+      <h2>¿De dónde saco el dinero?</h2>
+      <span class="subt">Simula una venta: lo que ganarías y el IRPF que pagarías según de qué producto lo saques</span>
+    </header>
+    <form class="simForm" id="simForm">
+      <label>Quiero sacar <input id="simCantidad" inputmode="decimal" autocomplete="off" placeholder="5.000" required></label>
+      <div class="segm" id="simModo"></div>
+      <label>de <select id="simProducto"></select></label>
+      <button class="btn act" type="submit">Simular</button>
+    </form>
+    <div id="simResultado"></div>
+  </section>
 </div>
 
 <div class="panel" id="tab-datos" role="tabpanel" hidden><div id="editor"></div></div>
@@ -1069,6 +1094,16 @@ body.video .tarjetaCanal{display:none}
         te hicieron ni tu situación, y Hacienda ya tiene casi todo esto en tus datos fiscales. Te avisa de lo que conviene
         mirar a mano: pérdidas con recompras cerca (la regla de los dos meses), traspasos que no son entre fondos y ventas
         sin coste anotado. Los rescates de planes de pensiones van aparte (son rendimiento del trabajo).</p></div></details>
+
+    <details class="faq"><summary>¿Cuánto pagaría a Hacienda si vendo? ¿De qué producto me conviene sacar el dinero?</summary><div>
+      <p>En <b>Rendimiento → «¿De dónde saco el dinero?»</b> escribe cuánto quieres sacar, en euros o en participaciones de
+        un producto. Para cada producto que tienes verás qué compras saldrían (las más antiguas primero, como hace
+        Hacienda), lo que ganarías o perderías y el IRPF estimado, contando lo que ya vendiste y cobraste este año: así la
+        ganancia cae en su tramo y una pérdida compensa lo ya ganado. Te dice cuál paga menos y por qué (por ejemplo, porque
+        tiene compras en pérdidas, o porque es un monetario con poca plusvalía).</p>
+      <p>Solo simula: no guarda nada. Es una <b>estimación orientativa</b>, no asesoramiento fiscal: no cuenta las pérdidas
+        de años anteriores que tengas pendientes ni comisiones, y vende al valor de hoy. Si es un fondo y lo que quieres es
+        cambiar de fondo, recuerda que un traspaso entre fondos no tributa.</p></div></details>
 
     <details class="faq"><summary>¿La rentabilidad cuenta los dividendos y lo que ya vendí?</summary><div>
       <p>En la ficha de cada producto (pestaña <b>Productos</b>) tienes tres cifras:</p>

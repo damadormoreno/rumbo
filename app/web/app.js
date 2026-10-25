@@ -1229,6 +1229,7 @@
     pintaComparacion();
     pintaDividendos();
     pintaFiscal();
+    pintaSimulador();
 
     const comp = D.comparador || [];
     const detalles = $("#compDetalles");
@@ -1438,6 +1439,92 @@
     const bajar = $("#fiscalBajar");
     bajar.href = URL.createObjectURL(new Blob(["\ufeff" + j.csv], { type: "text/csv;charset=utf-8" }));
     bajar.download = `rumbo_renta_${j.ano}.csv`;
+  }
+
+  /* ---------------------------------------------- simular una venta (solo con la app abierta) */
+  const SIM = { modo: "euros", producto: null, pidiendo: 0 };
+
+  function pintaSimulador() {
+    const sec = $("#seccionSimular");
+    if (!sec) return;
+    // Como «Para la Renta»: se calcula en el servidor, así que en la web publicada no sale.
+    sec.hidden = !window.Editor;
+    if (sec.hidden) return;
+    // Lo que se puede vender: ni cuentas, ni deudas, ni planes de pensiones (un rescate no es una venta).
+    const vendibles = D.productos.filter(p => (p.valor || 0) > 0.005 && !["efectivo", "deuda", "pension"].includes(p.tipoClave));
+    if (SIM.producto === null) SIM.producto = vendibles.some(p => p.id === estado.fondo) ? estado.fondo : "";
+    if (SIM.producto && !vendibles.some(p => p.id === SIM.producto)) SIM.producto = "";
+    if (SIM.modo === "unidades" && !SIM.producto) SIM.modo = "euros";
+    pintaSegm($("#simModo"), [{ id: "euros", et: "euros" }, { id: "unidades", et: "participaciones" }], SIM.modo, id => {
+      SIM.modo = id;
+      if (id === "unidades" && !SIM.producto && vendibles.length) SIM.producto = vendibles[0].id;
+      pintaSimulador();
+    });
+    const sel = $("#simProducto");
+    sel.innerHTML = (SIM.modo === "euros" ? `<option value="">cualquiera (los comparo todos)</option>` : "") +
+      vendibles.map(p => `<option value="${escH(p.id)}">${escH(p.corto || p.nombre)}</option>`).join("");
+    sel.value = SIM.producto;
+    sel.onchange = () => { SIM.producto = sel.value; };
+    $("#simForm").onsubmit = ev => { ev.preventDefault(); simula(); };
+    if (!$("#simResultado").innerHTML) {
+      $("#simResultado").innerHTML = `<p class="subt" style="margin:0">Escribe cuánto quieres sacar y pulsa «Simular»: verás,
+        para cada producto, qué compras saldrían (las más antiguas primero, como hace Hacienda), lo que ganarías o perderías
+        y el IRPF que sumaría a lo que ya llevas este año. No se guarda nada.</p>`;
+    }
+  }
+
+  async function simula() {
+    const cont = $("#simResultado");
+    const q = new URLSearchParams({ [SIM.modo]: $("#simCantidad").value });
+    if (SIM.producto) q.set("producto", SIM.producto);
+    const n = ++SIM.pidiendo;
+    let j = {};
+    try {
+      const r = await fetch("api/simular-venta?" + q);
+      j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.ok) throw new Error((j.errores || ["No he podido simularlo."]).join(" "));
+    } catch (e) {
+      if (n === SIM.pidiendo) cont.innerHTML = `<p class="vacio" style="text-align:left;padding:4px 0">${escH(e.message)}</p>`;
+      return;
+    }
+    if (n !== SIM.pidiendo) return;
+    const signo = v => `<span class="${v >= 0 ? "pos" : "neg"}">${G.fmtEurSigno(v)}</span>`;
+    const irpf = v => v < 0 ? `<span class="pos">${G.fmtEur(v)}</span>` : G.fmtEur(v);
+    const unidades = u => u == null ? "—" : G.nfNum.format(u);
+    const mejor = j.opciones.find(o => o.producto === j.mejor);
+    const pv = j.previo;
+    const kpis = [{ e: "Ya llevas en " + j.ano, v: signo(pv.ganancias),
+      n: `en ventas${pv.rendimientos ? ` y ${G.fmtEur(pv.rendimientos)} en dividendos e intereses` : ""}` }];
+    if (mejor) {
+      kpis.unshift({ e: "Menos IRPF: " + escH(mejor.nombre), v: irpf(mejor.impuesto),
+        n: `por sacar ${G.fmtEur(j.euros)} (${mejor.ganancia >= 0 ? "ganancia" : "pérdida"} de ${G.fmtEur(Math.abs(mejor.ganancia))}` +
+          (mejor.tipoMarginal ? `, al ${G.fmtPct(mejor.tipoMarginal, 0)}` : "") + ")" });
+    }
+    if (j.ahorro > 0) kpis.push({ e: "Te ahorras", v: `<span class="pos">${G.fmtEur(j.ahorro)}</span>`, n: "frente al que habías elegido" });
+    const fila = o => `<tr${o.producto === j.mejor ? ' class="simMejor"' : ""}>
+        <td>${escH(o.nombre)}${o.producto === j.mejor ? '<span class="simEtq">menos IRPF</span>' : ""}
+          ${o.producto === j.producto && o.producto !== j.mejor ? '<span class="simEtq simElegido">el tuyo</span>' : ""}
+          <span class="fiscalRevisar">${escH(o.tipo)}</span>
+          ${o.avisos.map(a => `<span class="fiscalRevisar">⚠ ${escH(a)}</span>`).join("")}</td>
+        ${o.alcanza ? `<td>${unidades(o.unidades)}</td><td>${G.fmtEur(o.coste)}</td><td>${signo(o.ganancia)}</td>
+          <td>${irpf(o.impuesto)}</td>` : `<td colspan="4" class="subt">Vale ${G.fmtEur(o.valor)}: no llega</td>`}</tr>`;
+    const lotes = o => `<details class="simLotes"><summary>Compras que saldrían de «${escH(o.nombre)}»</summary>
+      <div class="tablaEnv"><table class="dt"><thead><tr><th>Comprado el</th><th>Participaciones</th><th>Coste</th>
+        <th>Vale hoy</th><th>Ganancia o pérdida</th></tr></thead>
+       <tbody>${o.lotes.map(l => `<tr><td>${G.fmtFecha(l.fecha)}</td><td>${unidades(l.unidades)}</td>
+         <td>${G.fmtEur(l.coste)}</td><td>${G.fmtEur(l.valor)}</td><td>${signo(l.ganancia)}</td></tr>`).join("")}</tbody>
+      </table></div></details>`;
+    const [titulo, ...resto] = j.aviso.split(". ");
+    cont.innerHTML = `<div class="fiscalAviso"><b>${escH(titulo)}.</b> ${escH(resto.join(". "))}</div>` +
+      `<p class="simPorque">${escH(j.porque)}</p>` +
+      `<div class="kpis" style="margin:6px 0 8px">${kpis.map(k =>
+        `<div class="kpi"><div class="e">${k.e}</div><div class="v">${k.v}</div><div class="n">${k.n}</div></div>`).join("")}</div>` +
+      j.avisos.map(a => `<div class="av"><span>⚠</span><span>${escH(a)}</span></div>`).join("") +
+      `<h3>Si sacas ${G.fmtEur(j.euros)} de cada uno</h3>
+      <div class="tablaEnv"><table class="dt"><thead><tr><th>Producto</th><th>Participaciones</th><th>Coste (FIFO)</th>
+        <th>Ganancia o pérdida</th><th>IRPF estimado</th></tr></thead>
+       <tbody>${j.opciones.map(fila).join("")}</tbody></table></div>` +
+      j.opciones.filter(o => o.alcanza).map(lotes).join("");
   }
 
   /* ---------------------------------------------- avisos y pie */
