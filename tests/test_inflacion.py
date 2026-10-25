@@ -87,6 +87,22 @@ class DescargaIne(ConCarpeta):
         self.assertEqual(self.descarga(ine([("2025-02", 99.0)])), {"2025-01": 98.579})
         self.assertEqual(self.urls, [])
 
+    def test_al_actualizar_la_app_se_descarga_sin_tocar_los_precios(self):
+        # Con los precios al día la app arranca en «solo lo que falta»: el IPC, que aún no
+        # está guardado, se descarga sin subir VERSION_CACHE ni volver a bajar los precios.
+        os.makedirs(motor.CACHE)
+        with open(os.path.join(motor.CACHE, "AAPL.json"), "w", encoding="utf-8") as f:
+            json.dump({"2025-01-02": 10.0}, f)
+        with open(os.path.join(motor.CACHE, "AAPL.splits.json"), "w", encoding="utf-8") as f:
+            json.dump({"2020-08-31": 4.0}, f)
+        motor.SOLO_FALTAN = True
+        self.assertEqual(self.descarga(ine([("2025-01", 98.579)])), {"2025-01": 98.579})
+        self.assertEqual(len(self.urls), 1)
+        self.assertEqual(self.descarga(ine([("2025-02", 99.0)])), {"2025-01": 98.579})   # ya está: no sale
+        self.assertEqual(len(self.urls), 1)
+        self.assertEqual(motor.lee_cache(os.path.join(motor.CACHE, "AAPL.json")), {"2025-01-02": 10.0})
+        self.assertEqual(motor.splits_de("AAPL"), {"2020-08-31": 4.0})
+
     def test_sin_conexion_ni_cache_devuelve_vacio_sin_avisos(self):
         def caido(*a, **k):
             raise urllib.error.URLError("sin red")
