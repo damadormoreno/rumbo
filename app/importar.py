@@ -203,6 +203,46 @@ def myinvestor_a_movimientos(producto_id, lotes, reembolsos, serie_vl):
     return movs, sin_vl, traspasos
 
 
+# ---------------------------------------------------------------- Bit2Me
+
+# Columnas del extracto «summary-AAAA.xlsx» de Bit2Me. Sus tildes llegan rotas («operaci�n», o
+# «operaciÃ³n» si alguien lo ha vuelto a guardar), así que se comparan solo sus consonantes.
+CAB_BIT2ME = {"tipo": "Tipo de operación", "destino": "Cantidad de destino", "moneda_destino": "Moneda de destino",
+              "origen": "Cantidad de origen", "moneda_origen": "Moneda de origen",
+              "comision": "Comisión de la operación", "moneda_comision": "Moneda de la comisión",
+              "grupo": "Grupo", "descripcion": "Descripción", "fecha": "Fecha"}
+UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
+
+
+def _consonantes(t):
+    return re.sub(r"[^b-df-hj-np-tv-z]", "", sin_tildes(t))
+
+
+_COL_BIT2ME = {_consonantes(v): k for k, v in CAB_BIT2ME.items()}
+
+
+def leer_bit2me(contenido):
+    """Extracto de Bit2Me -> [(número de fila, {columna: valor})], o None si no lo es. La cabecera
+    va en la segunda fila (la primera está vacía), pero se busca en las primeras por si cambia."""
+    from openpyxl import load_workbook
+    try:
+        libro = load_workbook(io.BytesIO(contenido), data_only=True, read_only=True)
+        filas = [list(f) for f in libro.worksheets[0].iter_rows(values_only=True)]
+    except Exception:   # no es un Excel, o está dañado
+        return None
+    for n, cab in enumerate(filas[:5]):
+        idx = {_COL_BIT2ME[c]: i for i, c in enumerate(_consonantes(x) for x in cab) if c in _COL_BIT2ME}
+        if all(k in idx for k in ("tipo", "destino", "moneda_destino", "fecha", "descripcion")):
+            return [(m, {k: (f[i] if i < len(f) else None) for k, i in idx.items()})
+                    for m, f in enumerate(filas[n + 1:], start=n + 2)
+                    if any(c not in (None, "") and str(c).strip() for c in f)]
+    return None
+
+
+def es_bit2me(nombre, contenido):
+    return bool(nombre and nombre.lower().endswith((".xlsx", ".xlsm"))) and leer_bit2me(contenido) is not None
+
+
 # ---------------------------------------------------------------- lectura de tablas
 
 def leer_tabla(nombre, contenido):
@@ -619,6 +659,157 @@ def preparar_myinvestor(cfg, archivos, carpeta):
     return plan
 
 
+def pl(n, uno, varios):
+    return f"{n} {uno if n == 1 else varios}"
+
+
+def preparar_bit2me(cfg, archivos, carpeta):
+    """
+    [(nombre de archivo, bytes)] de Bit2Me -> Plan. Cada operación lleva un UUID en su descripción:
+    se guarda con el movimiento, así que reimportar un extracto o subir dos años que se solapan no
+    duplica nada. Lo que Bit2Me llama:
+      - Staking: una recompensa (sin importe: el extracto no dice lo que valía).
+      - Trade de euros a una cripto o al revés: una compra o una venta, con su comisión en euros.
+      - Trade de una cripto a otra (una permuta): para Hacienda, una venta de la que das y una compra
+        de la que recibes, las dos por el valor de mercado de ese día.
+      - Deposit y Withdrawal de euros: no se importan; lo que pagaste o cobraste ya está en cada operación.
+    """
+    plan = Plan()
+    res = Resolutor(cfg, plan, carpeta)
+    filas = []
+    for nombre, contenido in archivos:
+        leidas = leer_bit2me(contenido) if (nombre or "").lower().endswith((".xlsx", ".xlsm")) else None
+        if leidas is None:
+            plan.error(nombre, "No parece un extracto de Bit2Me (el «summary-AAAA.xlsx» con tus operaciones).")
+            continue
+        filas += [(f"{nombre} · fila {n}", f) for n, f in leidas]
+
+    def lee(f):
+        op = sin_tildes(f.get("tipo"))
+        d, o, com = (lee_numero(f.get(k)) for k in ("destino", "origen", "comision"))
+        md, mo, mc = (str(f.get(k) or "").strip().upper() for k in ("moneda_destino", "moneda_origen", "moneda_comision"))
+        m = UUID.search(str(f.get("descripcion") or ""))
+        return op, d, md, o, mo, com, mc, m.group(0).lower() if m else None
+
+    # Pagar con tarjeta es un ingreso de euros con el mismo UUID que la compra que paga: su comisión
+    # es parte de lo que costó la compra.
+    tarjeta = {}
+    for _, f in filas:
+        op, d, md, o, mo, com, mc, uid = lee(f)
+        if op == "deposit" and md == "EUR" and mc == "EUR" and uid and isinstance(com, float) and com > 0:
+            tarjeta[uid] = com
+    con_tarjeta, euros, fuera = set(), Counter(), Counter()
+
+    def precio(ref, fecha):
+        p = res.datos(ref)
+        return valor_en(res.serie(ref, fecha), fecha, margen=6) if p and p.get("fuente") != "manual" else None
+
+    def anota(fila, ref, fecha, tipo, uid, unidades, importe, comision=None, nota="Bit2Me", marcas=()):
+        plan.movimientos.append({
+            "fila": fila, "producto": ref, "fecha": fecha, "tipo": tipo, "unidades": round(unidades, 8),
+            "importe": round(importe, 2) if importe is not None else None,
+            "comision": round(comision, 2) if comision and round(comision, 2) > 0 else None,
+            "nota": nota, "marcas": list(marcas), "origen": "bit2me",
+            "externo": f"bit2me:{uid}:{tipo}" if uid else None})
+
+    for fila, f in filas:
+        op, d, md, o, mo, com, mc, uid = lee(f)
+        fecha = lee_fecha(f.get("fecha"))
+        if not fecha:
+            plan.error(fila, f"La fecha «{f.get('fecha') or ''}» no es válida.")
+            continue
+        if "error" in (d, o, com):
+            plan.error(fila, "Alguna cantidad no se entiende.")
+            continue
+        d, o, com = d or 0.0, o or 0.0, com or 0.0
+
+        if op in ("deposit", "withdrawal"):
+            moneda = md if op == "deposit" else mo or md
+            if moneda == "EUR":
+                euros[op] += 1
+            else:
+                fuera[(op, moneda)] += 1
+            continue
+        if op == "staking":
+            if not d or not md:
+                plan.error(fila, "La recompensa de staking no trae cuántas unidades recibiste.")
+                continue
+            ref = res.producto(fila, md, "", "cripto")
+            if ref:
+                anota(fila, ref, fecha, "staking", uid, d, None, marcas=["sin valorar"])
+            continue
+        if op != "trade":
+            plan.error(fila, f"No sé importar las operaciones de tipo «{f.get('tipo') or ''}».")
+            continue
+
+        if not (d and o and md and mo) or md == mo:
+            plan.error(fila, "La operación no dice qué diste y qué recibiste.")
+            continue
+        if com and mc not in (md, mo):
+            plan.error(fila, f"La comisión está en {mc}, que no es ninguna de las dos monedas de la operación: "
+                             "anótala a mano.")
+            continue
+        if com >= (d if mc == md else o):
+            plan.error(fila, "La comisión es tan grande como la operación: revísala.")
+            continue
+        # Si la comisión va en lo que recibes, se descuenta de ello; si va en lo que das, ya está dentro.
+        neto = d - com if mc == md else d
+        if mo == "EUR":
+            ref = res.producto(fila, md, "", "cripto")
+            if not ref:
+                continue
+            extra = tarjeta.get(uid, 0.0)
+            con_tarjeta.update([uid] if extra else [])
+            cuota = (com if mc == "EUR" else com * o / d) + extra
+            anota(fila, ref, fecha, "compra", uid, neto, o + extra, cuota,
+                  marcas=["con la comisión de la tarjeta"] if extra else ())
+        elif md == "EUR":
+            ref = res.producto(fila, mo, "", "cripto")
+            if not ref:
+                continue
+            cuota = com if mc == "EUR" else com * d / (o - com)
+            anota(fila, ref, fecha, "venta", uid, o, neto, cuota)
+        else:
+            sale, entra = res.producto(fila, mo, "", "cripto"), res.producto(fila, md, "", "cripto")
+            if not (sale and entra):
+                continue
+            # Lo que vale la permuta antes de la comisión: con el precio de lo que das o, si no cotiza,
+            # con el de lo que recibes (que, si la comisión iba en lo que das, es lo que queda tras ella).
+            po, pd = precio(sale, fecha), precio(entra, fecha)
+            if po:
+                bruto, con = o * po, mo
+            elif pd:
+                bruto, con = d * pd * (o / (o - com) if mc == mo else 1), md
+            else:
+                plan.error(fila, f"No encuentro el precio en euros de {mo} ni de {md} el {almacen.fmt_fecha(fecha)}: "
+                                 "no puedo valorar la permuta. Anota a mano la venta y la compra.")
+                continue
+            cuota = bruto * com / (o if mc == mo else d) if com else 0.0
+            # La comisión se cuenta una vez, en la venta; la compra cuesta lo que vale lo recibido.
+            nota, marcas = f"Bit2Me · permuta de {mo} a {md}", [f"permuta valorada al precio de {con}"]
+            anota(fila, sale, fecha, "venta", uid, o, bruto - cuota, cuota, nota, marcas)
+            anota(fila, entra, fecha, "compra", uid, neto, bruto - cuota, None, nota, marcas)
+
+    if euros:
+        partes = [pl(n, uno, varios) for n, uno, varios in ((euros["deposit"], "ingreso", "ingresos"),
+                                                            (euros["withdrawal"], "retirada", "retiradas")) if n]
+        plan.avisos.append(f"No se importan {' y '.join(partes)} de euros: Rumbo sigue el efectivo con saldos, y lo que "
+                           "pagaste o cobraste ya está en cada compra y venta.")
+    sueltas = sum(1 for uid in tarjeta if uid not in con_tarjeta)
+    if sueltas:
+        plan.avisos.append(f"La comisión de {pl(sueltas, 'ingreso', 'ingresos')} con tarjeta que no pagan ninguna compra "
+                           "del extracto no se anota.")
+    if fuera:
+        monedas = ", ".join(sorted({m for _, m in fuera}))
+        entradas = sum(n for (op, _), n in fuera.items() if op == "deposit")
+        salidas = sum(n for (op, _), n in fuera.items() if op == "withdrawal")
+        partes = [x for x in (entradas and pl(entradas, "entrada de cripto por blockchain", "entradas de cripto por blockchain"),
+                              salidas and pl(salidas, "retirada de cripto", "retiradas de cripto")) if x]
+        plan.avisos.append(f"No se importan {' ni '.join(partes)} ({monedas}): Bit2Me no dice lo que te costaron. Sin "
+                           "ellas, las unidades de esas monedas en Rumbo no cuadran con Bit2Me.")
+    return plan
+
+
 # ---------------------------------------------------------------- aplicar
 
 def respuesta_valida(item, respuesta, real):
@@ -817,6 +1008,10 @@ def aplicar(cfg, plan, respuestas=None, carpeta_series=None):
         return (m["producto"], m["fecha"], m["tipo"], round(float(m.get("unidades") or 0), 4),
                 round(float(m.get("importe") or 0), 2))
     existentes = Counter(firma(m) for m in cfg["movimientos"])
+    # Lo que trae su propio identificador (el UUID de Bit2Me) se reconoce por él. Si no está, aún
+    # puede ser lo mismo importado antes con la plantilla o la IA, sin identificador.
+    externos = {m["externo"] for m in cfg["movimientos"] if m.get("externo")}
+    sin_externo = Counter(firma(m) for m in cfg["movimientos"] if not m.get("externo"))
 
     añadidos, duplicados, filas = 0, 0, []
     orden = {"compra": 0, "comision": 1, "dividendo": 2, "staking": 2, "venta": 3, "traspaso": 4, "ajuste": 6}
@@ -832,7 +1027,13 @@ def aplicar(cfg, plan, respuestas=None, carpeta_series=None):
             datos["destino"] = real(mv["destino"])
         estado = "nuevo"
         clave = firma({**datos, "unidades": datos.get("unidades", 0)})
-        if existentes[clave] > 0:
+        externo = mv.get("externo")
+        if externo and (externo in externos or sin_externo[clave] > 0):
+            duplicados += 1
+            estado = "repetido"
+            if externo not in externos:
+                sin_externo[clave] -= 1   # cada uno guardado sin identificador cubre a uno solo
+        elif not externo and existentes[clave] > 0:
             duplicados += 1
             estado = "repetido"
             if mv["tipo"] == "staking":
@@ -842,6 +1043,9 @@ def aplicar(cfg, plan, respuestas=None, carpeta_series=None):
             try:
                 guardado = almacen.guarda_movimiento(cfg, datos)
                 guardado["origen"] = mv["origen"]
+                if externo:
+                    guardado["externo"] = externo
+                    externos.add(externo)
                 if mv["tipo"] == "traspaso":
                     existentes[firma(guardado)] += 1
                 añadidos += 1
@@ -916,7 +1120,9 @@ def aplicar(cfg, plan, respuestas=None, carpeta_series=None):
                          if p["id"] != real(t["ref"]) and p.get("tipo") not in almacen.SOLO_SALDO]
     return {
         "añadidos": añadidos, "repetidos": duplicados, "saldos": saldos, "sustituidos": sustituidos,
-        "errores": sorted(errores, key=lambda e: (str(type(e["fila"])), str(e["fila"]).zfill(6))),
+        # «fila 9» antes que «fila 10», también en «summary-2025.xlsx · fila 9».
+        "errores": sorted(errores, key=lambda e: (str(type(e["fila"])),
+                                                  re.sub(r"\d+", lambda d: d.group().zfill(6), str(e["fila"])))),
         "avisos": plan.avisos,
         "totales": {"compras": total("compra"), "ventas": total("venta"),
                     "dividendos": total("dividendo"), "comisiones": total("comision"),

@@ -1094,6 +1094,7 @@
   const IMP = { origen: "myinvestor", informe: null, token: null, hecho: null, prompt: null, archivos: [], respuestas: {} };
   const ICONOS = {
     myinvestor: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18M5 21V10l7-5 7 5v11M9 21v-6h6v6"/></svg>',
+    bit2me: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 7.5v9M9.5 7.5h3.5a2 2 0 0 1 0 4.5H9.5M9.5 12h4a2.25 2.25 0 0 1 0 4.5h-4"/></svg>',
     plantilla: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/></svg>',
     ia: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 17l.8 2.2L22 20l-2.2.8L19 23l-.8-2.2L16 20l2.2-.8z"/></svg>',
   };
@@ -1119,6 +1120,15 @@
         ${zona(".csv", true, "Arrastra aquí los CSV de MyInvestor")}
         <p class="ayuda">Cada importación sustituye lo que importaste antes de ese mismo fondo: repítela cada mes sin miedo a duplicar.
           MyInvestor no permite descargar las órdenes de ETF o acciones: haz capturas y usa la opción «Con ayuda de una IA».</p>`;
+    } else if (IMP.origen === "bit2me") {
+      paso = `<ol class="pasos">
+          <li>Entra en Bit2Me desde el ordenador y descarga el <b>extracto de operaciones</b> de cada año
+            (un Excel llamado <code>summary-AAAA.xlsx</code>).</li>
+          <li>Arrastra aquí todos los archivos a la vez.</li></ol>
+        ${zona(".xlsx", true, "Arrastra aquí los extractos de Bit2Me")}
+        <p class="ayuda">Trae las recompensas de staking, las compras, las ventas y las permutas entre criptos.
+          Cada operación lleva su identificador: puedes volver a importar un año, o dos que se solapen, sin duplicar nada.
+          Los ingresos y retiradas de euros no se importan: lo que pagaste ya está en cada compra.</p>`;
     } else if (IMP.origen === "plantilla") {
       paso = `<ol class="pasos">
           <li>Descarga la plantilla: <a class="btn" href="api/plantilla.xlsx" download>Excel</a>
@@ -1141,6 +1151,7 @@
         <span class="subt">Trae tus movimientos de golpe. Antes de guardar nada verás una vista previa.</span></header>
       <div class="imOps">
         ${op("myinvestor", "MyInvestor", "El CSV de cada fondo")}
+        ${op("bit2me", "Bit2Me", "El extracto de cada año")}
         ${op("plantilla", "Plantilla", "Excel o CSV, para cualquier banco")}
         ${op("ia", "Con ayuda de una IA", "Convierte el extracto de tu banco")}
       </div>

@@ -59,7 +59,7 @@ Todo lo que pedisteis en los comentarios del vídeo y en GitHub, por orden de im
 - [Rumbo en Docker (NAS, Raspberry Pi o servidor de casa)](#rumbo-en-docker-nas-raspberry-pi-o-servidor-de-casa)
 - [Primer uso](#primer-uso)
 - [Meter tus datos](#meter-tus-datos)
-- [Importar de golpe (MyInvestor, Excel o con una IA)](#importar-de-golpe)
+- [Importar de golpe (MyInvestor, Bit2Me, Excel o con una IA)](#importar-de-golpe)
 - [El día a día](#el-día-a-día)
 - [Tu patrimonio en otra moneda](#tu-patrimonio-en-otra-moneda)
 - [Dónde está tu dinero, tu colchón y tu reparto objetivo](#dónde-está-tu-dinero-tu-colchón-y-tu-reparto-objetivo)
@@ -96,7 +96,7 @@ Todo lo que pedisteis en los comentarios del vídeo y en GitHub, por orden de im
 - **Dividendos, cupones e intereses** (también los de tus cuentas remuneradas): cuánto cobras al año, por producto, y tu rentabilidad por dividendo.
 - **Compras en dólares u otra moneda**: escribes lo que pagaste y se pasa a euros con el cambio de ese día.
 - **Ver el panel en otra moneda**: dólares, libras, francos suizos o pesos (mexicanos, argentinos, chilenos o colombianos), al cambio de hoy.
-- **Importación de golpe**: el CSV de MyInvestor, una plantilla de Excel o el extracto de cualquier banco convertido con una IA gratuita.
+- **Importación de golpe**: el CSV de MyInvestor, el extracto de Bit2Me, una plantilla de Excel o el extracto de cualquier banco convertido con una IA gratuita.
 - **Nunca tocas un archivo a mano**: todo se hace con formularios, con validación y mensajes en castellano llano.
 - **Copias de seguridad automáticas**, tus datos **en Excel** y exportación del panel a una página web (con opción de **ocultar los importes**).
 - **Modo vídeo** para grabar tu panel, tema claro u oscuro, y **tus datos nunca salen de tu ordenador**.
@@ -330,7 +330,7 @@ Arriba, junto al logo, está el selector de perfiles. **«+ Añadir un perfil»*
 
 ## Importar de golpe
 
-**Mis datos → Importar**. Hay tres caminos y **siempre verás una vista previa antes de guardar nada**, con los totales para compararlos con tu banco y los errores explicados fila por fila.
+**Mis datos → Importar**. Hay cuatro caminos y **siempre verás una vista previa antes de guardar nada**, con los totales para compararlos con tu banco y los errores explicados fila por fila.
 
 ![Importar](docs/capturas/06_importar.png)
 
@@ -352,6 +352,24 @@ En la gráfica de cada fondo, una raya marca el día de cada traspaso: «⇄ a W
 Rumbo recuerda tu respuesta para la siguiente importación. Si las participaciones no cuadran con MyInvestor, usa **Movimientos → «Cuadrar participaciones»**.
 
 MyInvestor no permite descargar las órdenes de **ETF o acciones**: haz capturas de pantalla de tus órdenes y usa la opción **«Con ayuda de una IA»**.
+
+### Bit2Me (criptomonedas)
+
+1. En la web de Bit2Me, descarga el **extracto de operaciones** de cada año: un Excel llamado `summary-AAAA.xlsx`.
+2. Arrastra todos los años a la vez (opción **«Bit2Me»**) y pulsa **«Revisar antes de importar»**. Si lo subes como plantilla, Rumbo también lo reconoce.
+
+Cada operación del extracto lleva su propio identificador, y Rumbo lo guarda: puedes volver a importar un año, o dos que se solapan, sin duplicar nada. Las recompensas que ya importaste antes con la plantilla o la IA tampoco se duplican.
+
+| En Bit2Me | En Rumbo |
+|---|---|
+| **Staking** | Una recompensa de staking por fila, sin importe: el extracto no dice lo que valía. La Renta te avisa al vender. |
+| **Trade** de euros a una cripto | Una compra. El importe es lo que pagaste, con la comisión; si Bit2Me la cobra en la cripto, se valora al precio de la operación y se descuenta de las unidades. |
+| **Trade** de una cripto a euros | Una venta, por lo que cobraste después de la comisión. |
+| **Trade** de una cripto a otra | Para Hacienda, una permuta: una venta de la que das y una compra de la que recibes, las dos por su valor en euros ese día (con el precio de la que cotiza). La comisión cuenta una vez, en la venta. |
+| **Deposit** y **Withdrawal** de euros | No se importan: Rumbo sigue el efectivo con saldos y lo que pagaste ya está en cada compra. Si pagaste con tarjeta, su comisión se suma a la compra que pagó. |
+| Cripto que llega o sale **por blockchain** | No se importa, con un aviso: Bit2Me no dice lo que te costó. Anota a mano la compra original. |
+
+Si una moneda no está en Rumbo, se busca como criptomoneda en Yahoo y CoinGecko. Las que no cotizan en ninguno (por ejemplo, `SOL2`) dan un error en cada fila: créalas en **Productos** como «Criptomoneda» con «Valor anotado a mano» y ese mismo identificador, y vuelve a importar.
 
 ### Plantilla de Excel o CSV (cualquier banco)
 
