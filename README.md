@@ -66,6 +66,7 @@ Todo lo que pedisteis en los comentarios del vídeo y en GitHub, por orden de im
 - [¿Y si lo hubieras metido todo en un indexado?](#y-si-lo-hubieras-metido-todo-en-un-indexado)
 - [Dividendos, cupones e intereses](#dividendos-cupones-e-intereses)
 - [Para la Renta](#para-la-renta)
+- [¿De dónde saco el dinero?](#de-dónde-saco-el-dinero)
 - [Compartir mi mes](#compartir-mi-mes)
 - [Copias de seguridad, Excel y cambiar de ordenador](#copias-de-seguridad-excel-y-cambiar-de-ordenador)
 - [Publicar tu panel como web](#publicar-tu-panel-como-web)
@@ -500,6 +501,19 @@ En **Rendimiento → «Para la Renta»** eliges el año y tienes lo que hace fal
 Es orientativo: **no es asesoramiento fiscal**. Rumbo no sabe las retenciones que te hicieron ni tu situación, y Hacienda ya tiene casi todo esto en tus datos fiscales. Se calcula en tu ordenador y no sale en la web publicada ni en el modo vídeo.
 
 ![Para la Renta](docs/capturas/16_renta.png)
+
+---
+
+## ¿De dónde saco el dinero?
+
+En **Rendimiento → «¿De dónde saco el dinero?»** escribes cuánto quieres sacar, en euros o en participaciones de un producto, y Rumbo simula la venta en cada producto que tienes:
+
+- **Qué compras saldrían**, con el mismo FIFO que «Para la Renta» (lo primero que compraste es lo primero que vendes, y los traspasos entre fondos conservan el coste y la fecha).
+- **La ganancia o pérdida** y el **IRPF estimado** con la escala de la base del ahorro, sumado a lo que ya vendiste y cobraste este año: la ganancia cae en su tramo, y una pérdida compensa lo ya ganado (y hasta el 25 % de los dividendos e intereses).
+- **Cuál paga menos y por qué**: porque tiene compras en pérdidas, porque casi no tiene plusvalía (un monetario, por ejemplo)... y cuánto te ahorras frente al que habías elegido.
+- **Avisos**: en un fondo, que un traspaso entre fondos no tributa; en una venta con pérdida, la regla de los dos meses (o de un año en fondos); y si venderías recompensas de staking sin valorar, que su coste falta y la ganancia sale de más (las valoradas cuestan lo que valían al recibirlas, y las de este año cuentan como rendimientos).
+
+Solo simula: **no guarda nada**. No entran los planes de pensiones (un rescate tributa como rendimiento del trabajo), los pisos ni los préstamos P2P. Es una estimación orientativa, **no asesoramiento fiscal**: vende al valor de hoy, sin comisiones, y no sabe las pérdidas de años anteriores que tengas pendientes ni tu situación. Los tramos están en `app/simulador.py` (`TRAMOS_AHORRO`), con la fuente del BOE. Como «Para la Renta», no sale en la web publicada ni en el modo vídeo.
 
 ---
 

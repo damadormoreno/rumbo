@@ -192,5 +192,6 @@ class FueraDeLaWebPublicada(ConCarpeta):
                                 self.carpeta, descargar=False)
         html = exportar.pagina(os.path.join(servidor.RAIZ, "app", "web"), D)
         self.assertIn('id="seccionFiscal" hidden', html)    # oculta: sin el editor no se enseña
+        self.assertIn('id="seccionSimular" hidden', html)   # el simulador de venta, igual
         self.assertNotIn("window.Editor = {", html)          # el editor (y su servidor) no van en la web
         self.assertNotIn("ventasDetalle", json.dumps(D))     # los datos del panel no llevan el detalle de ventas

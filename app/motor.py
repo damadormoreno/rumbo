@@ -1417,11 +1417,12 @@ def serie_cambio(moneda, carpeta, fresca=False):
 
 # ---------------------------------------------------------------- construccion
 
-def fifo_cartera(cfg, productos_cfg=None, cache=None, splits=None):
+def fifo_cartera(cfg, productos_cfg=None, cache=None, splits=None, conservar_lotes=False):
     """FIFO de todos los productos a la vez (los traspasos pasan lotes de uno a otro).
     Devuelve (resultado de aplicar_todos, movimientos por producto, valores anotados por producto).
     Los movimientos van con las participaciones de después de los splits (ver ajusta_splits);
-    si se pasa el diccionario 'splits', se llena con lo que se ha ajustado de cada producto."""
+    si se pasa el diccionario 'splits', se llena con lo que se ha ajustado de cada producto.
+    Con conservar_lotes=True, cada producto trae también los lotes que le quedan."""
     if productos_cfg is None:
         productos_cfg = cfg.get("productos", [])
     movs_por, vals_por = defaultdict(list), defaultdict(list)
@@ -1444,7 +1445,8 @@ def fifo_cartera(cfg, productos_cfg=None, cache=None, splits=None):
                  if v.get("aportado") is not None]
         return interpola(snaps, fecha)
     con_movs = [p for p in productos_cfg if p.get("tipo") not in ("efectivo", "deuda")]
-    return aplicar_todos(con_movs, movs_por, valor_a_mano, aportado_a_mano=aportado_a_mano), movs_por, vals_por
+    return (aplicar_todos(con_movs, movs_por, valor_a_mano, conservar_lotes=conservar_lotes,
+                          aportado_a_mano=aportado_a_mano), movs_por, vals_por)
 
 
 def construir(cfg, carpeta, descargar=True, cache=None, historico=True):

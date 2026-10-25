@@ -26,7 +26,7 @@ import webbrowser
 from flask import Flask, Response, g, jsonify, redirect, request, send_from_directory
 from werkzeug.serving import make_server
 
-from . import almacen, buscar, exportar, fiscal, importar, motor, periodicas, plantilla, red
+from . import almacen, buscar, exportar, fiscal, importar, motor, periodicas, plantilla, red, simulador
 
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB = os.path.join(RAIZ, "app", "web")
@@ -656,6 +656,24 @@ def api_fiscal():
     with cerrojo:   # usa el motor, que no admite dos cálculos a la vez
         inf = fiscal.informe(cartera(), ano, cache=os.path.join(DATOS, "cache"))
     return jsonify(ok=True, csv=fiscal.csv_texto(inf), **inf)
+
+
+@app.get("/api/simular-venta")
+def api_simular_venta():
+    """Qué IRPF pagarías según de dónde saques un importe (orientativo). Solo simula: no guarda nada."""
+    if modo() == "todos":
+        return jsonify(ok=False, errores=["La declaración es de cada persona: elige un perfil arriba."]), 400
+    a = request.args
+    with cerrojo:   # usa el motor, que no admite dos cálculos a la vez
+        datos = lee_json(ruta_calculado()) or recalcula(descargar=False) or {}
+        valores = {p["id"]: p.get("valor") for p in datos.get("productos", [])}
+        try:
+            res = simulador.simular(cartera(), valores, producto=a.get("producto") or None,
+                                    euros=a.get("euros"), unidades=a.get("unidades"),
+                                    cache=os.path.join(DATOS, "cache"))
+        except almacen.ErrorValidacion as e:
+            return jsonify(ok=False, errores=e.errores), 400
+    return jsonify(ok=True, **res)
 
 
 @app.get("/api/precio")
