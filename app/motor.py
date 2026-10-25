@@ -2154,16 +2154,16 @@ def construir(cfg, carpeta, descargar=True, cache=None, historico=True):
     # ---- ¿y si lo hubieras metido todo en un indexado? ----
     # Las mismas entradas y salidas de dinero que tú, en los mismos días, pero en una
     # cartera de referencia. Se compara con lo que valen hoy tus productos con movimientos.
-    con_flujos = [p for p in productos if p["_mv"]["flujos"]]
-    comparacion = None
-    if con_flujos and any(flujo_dia):
-        tuya = [round(sum((p["serie"][i] or 0) for p in con_flujos), 2) for i in range(n)]
-        i0 = next(i for i in range(n) if flujo_dia[i] or tuya[i])
+    def comparar(prods, flujo):
+        if not prods or not any(flujo):
+            return None
+        tuya = [round(sum((p["serie"][i] or 0) for p in prods), 2) for i in range(n)]
+        i0 = next(i for i in range(n) if flujo[i] or tuya[i])
         acum, aportado_c = 0.0, []
         for i in range(n):
-            acum += flujo_dia[i]
+            acum += flujo[i]
             aportado_c.append(round(acum, 2) if i >= i0 else None)
-        flujos_c = [(d(eje_iso[i]), -flujo_dia[i]) for i in range(n) if flujo_dia[i]]
+        flujos_c = [(d(eje_iso[i]), -flujo[i]) for i in range(n) if flujo[i]]
 
         refs = []
         for rid, ref in REFERENCIAS.items():
@@ -2174,10 +2174,10 @@ def construir(cfg, carpeta, descargar=True, cache=None, historico=True):
             unidades, serie_r, antes = [0.0] * len(precios), [], False
             for i in range(n):
                 pr_hoy = [precios[k][i] or primeros[k] for k in range(len(precios))]
-                if flujo_dia[i]:
+                if flujo[i]:
                     antes = antes or any(precios[k][i] is None for k in range(len(precios)))
                     for k, (_, peso) in enumerate(ref["piezas"]):
-                        unidades[k] += flujo_dia[i] * peso / pr_hoy[k]
+                        unidades[k] += flujo[i] * peso / pr_hoy[k]
                 valor_r = sum(unidades[k] * pr_hoy[k] for k in range(len(precios)))
                 serie_r.append(round(valor_r, 2) if i >= i0 else None)
             refs.append({"id": rid, "nombre": ref["nombre"], "detalle": ref["detalle"],
@@ -2185,11 +2185,28 @@ def construir(cfg, carpeta, descargar=True, cache=None, historico=True):
                          "tir": r4(xirr(flujos_c + [(fecha_extracto, serie_r[-1])])),
                          "aviso": ("Tienes aportaciones anteriores a los precios de esta referencia: "
                                    "para esas se usa su primer precio conocido.") if antes else None})
-        if refs:
-            comparacion = {"desde": eje_iso[i0], "tuya": [v if i >= i0 else None for i, v in enumerate(tuya)],
-                           "aportado": aportado_c, "tuValor": tuya[-1],
-                           "tuTir": r4(xirr(flujos_c + [(fecha_extracto, tuya[-1])])),
-                           "referencias": refs}
+        if not refs:
+            return None
+        return {"desde": eje_iso[i0], "tuya": [v if i >= i0 else None for i, v in enumerate(tuya)],
+                "aportado": aportado_c, "tuValor": tuya[-1],
+                "tuTir": r4(xirr(flujos_c + [(fecha_extracto, tuya[-1])])),
+                "referencias": refs}
+
+    con_flujos = [p for p in productos if p["_mv"]["flujos"]]
+    comparacion = comparar(con_flujos, flujo_dia)
+    if comparacion:
+        # Lo mismo, solo con lo invertido a largo plazo (sin el colchón ni los monetarios).
+        # Sus flujos son los de esos productos: un traspaso desde uno que no lo es entra como
+        # dinero nuevo, y uno entre dos de largo plazo se anula (sale de uno y entra en otro).
+        # Si todos lo son, o ninguno, no hay nada que elegir.
+        largos = [p for p in con_flujos if p.get("largoPlazo") is not False]
+        solo = None
+        if largos and len(largos) < len(con_flujos):
+            flujo_l = [round(sum(flujo_prod[p["id"]][i] for p in largos), 2) for i in range(n)]
+            solo = comparar(largos, flujo_l)
+            if solo:
+                solo["excluidos"] = [p["corto"] for p in con_flujos if p.get("largoPlazo") is False]
+        comparacion["soloLargoPlazo"] = solo
 
     # ---- datos para el ticker en vivo ----
     # Una cripto (o un ETP que la replica, con "vivo": id de CoinGecko) se mueve
