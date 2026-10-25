@@ -99,6 +99,7 @@
     ordenTabla: { col: "fecha", desc: true },
     btcVivo: null,
     compRef: recuerda.lee("patrimonio.compRef") || "mundo",
+    compGrupo: recuerda.lee("patrimonio.compGrupo") || "todo",
     verVendidos: recuerda.lee("patrimonio.vendidos") === "1",
     moneda: recuerda.lee("patrimonio.moneda") || "EUR",
     proyHoy: recuerda.lee("patrimonio.proyHoy") === "1",
@@ -108,19 +109,34 @@
   };
 
   /* ---------------------------------------------- ¿y si lo hubieras metido en un indexado? */
+  const GRUPOS_COMP = [{ id: "todo", et: "Toda la cartera" }, { id: "largo", et: "Solo largo plazo" }];
+  const listaNombres = ns => ns.length > 1 ? `${ns.slice(0, -1).join(", ")} y ${ns[ns.length - 1]}` : ns.join("");
+
   function pintaComparacion() {
-    const C = D.comparacion, sec = $("#seccionComparar");
+    const comp = D.comparacion, sec = $("#seccionComparar"), fila = $("#compGrupoFila");
     if (!sec) return;
-    if (!C || !C.referencias.length) {
+    if (!comp || !comp.referencias.length) {
       // Sin el campo, los datos los calculó una versión anterior de la app (que sigue abierta).
       $("#compTitular").innerHTML = "comparacion" in D
         ? '<p class="vacio">Aparecerá cuando tengas compras anotadas.</p>'
         : '<p class="vacio">Cierra la ventana negra de la app y vuelve a abrirla para calcular esta sección.</p>';
       $("#compRef").innerHTML = "";
       if ($("#compRango")) $("#compRango").innerHTML = "";
+      if (fila) fila.hidden = true;
       $("#grafComparacion").innerHTML = "";
       return;
     }
+    // Toda la cartera o solo lo de largo plazo. Si todo lo es, o nada, no hay nada que elegir:
+    // se oculta el selector (sin olvidar lo elegido, por si luego cambias la marca de algún producto).
+    const V = window.Calculos.vistaComparacion(comp, estado.compGrupo), C = V.datos, largo = V.grupo === "largo";
+    if (fila) {
+      fila.hidden = !V.hayOpcion;
+      pintaSegm($("#compGrupo"), GRUPOS_COMP, V.grupo, id => {
+        estado.compGrupo = id; recuerda.guarda("patrimonio.compGrupo", id); pintaComparacion();
+      });
+    }
+    const fuera = V.hayOpcion ? listaNombres(comp.soloLargoPlazo.excluidos.map(escH)) : "";
+    const tuNombre = largo ? "Tu largo plazo" : "Tu cartera";
     if (!C.referencias.some(r => r.id === estado.compRef)) estado.compRef = C.referencias[0].id;
     const r = C.referencias.find(x => x.id === estado.compRef);
     const segm = $("#compRef");
@@ -142,14 +158,15 @@
     pintaSegm($("#compRango"), RANGOS, estado.rangoComp, id => { estado.rangoComp = id; pintaComparacion(); });
     const i0 = desdeIdx(estado.rangoComp), cortaC = arr => (arr || []).slice(i0);
     $("#compTitular").innerHTML =
-      caja("Tú tienes hoy", G.fmtEur(C.tuValor, 0), `TIR ${G.fmtPctSigno(C.tuTir, 1)}`) +
+      caja(largo ? "Tienes a largo plazo" : "Tú tienes hoy", G.fmtEur(C.tuValor, 0), `TIR ${G.fmtPctSigno(C.tuTir, 1)}`) +
       caja(`Con el ${r.nombre} tendrías`, G.fmtEur(r.valor, 0), `TIR ${G.fmtPctSigno(r.tir, 1)}`) +
-      caja("Has puesto de tu bolsillo", G.fmtEur(C.aportado[C.aportado.length - 1], 0), "compras menos ventas") +
+      caja("Has puesto de tu bolsillo", G.fmtEur(C.aportado[C.aportado.length - 1], 0),
+        largo ? "compras y traspasos desde fuera, menos ventas" : "compras menos ventas") +
       caja("Veredicto", veredicto, "", "veredicto");
     G.multiLinea($("#grafComparacion"), {
       fechas: cortaC(D.fechas), alto: 300,
       series: [
-        { nombre: "Tu cartera", valores: cortaC(C.tuya), color: G.css("--s1"), destacado: true },
+        { nombre: tuNombre, valores: cortaC(C.tuya), color: G.css("--s1"), destacado: true },
         { nombre: "Con el " + r.nombre, valores: cortaC(r.serie), color: G.css("--s2") },
         { nombre: "Tu dinero puesto", valores: cortaC(C.aportado), color: G.css("--tinta3") },
       ],
@@ -158,9 +175,16 @@
       desdeCero: true,
     });
     const ley = (c, t) => `<span class="leyItem"><i style="background:${G.css(c)}"></i>${t}</span>`;
-    $("#compNota").innerHTML = `<span class="leyComp">${ley("--s1", "Tu cartera")}${ley("--s2", "Con el " + r.nombre)}${ley("--tinta3", "Tu dinero puesto")}</span>
-      ${r.detalle} Solo cuenta los productos con compras anotadas (no las cuentas ni lo
-      que valoras a mano sin movimientos), desde el ${G.fmtFecha(C.desde)}. Sin impuestos ni comisiones de compra.
+    const queCuenta = largo
+      ? `Solo cuenta los productos marcados como inversión a largo plazo con compras anotadas: deja fuera
+        ${fuera}. Un traspaso desde ${comp.soloLargoPlazo.excluidos.length > 1 ? "esos productos" : "ese producto"}
+        cuenta como dinero que entra (y uno hacia ${comp.soloLargoPlazo.excluidos.length > 1 ? "ellos" : "él"}, como dinero que sale);
+        entre dos de largo plazo, no cuenta. Desde el ${G.fmtFecha(C.desde)}.`
+      : `Solo cuenta los productos con compras anotadas (no las cuentas ni lo
+        que valoras a mano sin movimientos), desde el ${G.fmtFecha(C.desde)}.${V.hayOpcion
+          ? ` Incluye lo que no es de largo plazo (${fuera}): con «Solo largo plazo» lo dejas fuera.` : ""}`;
+    $("#compNota").innerHTML = `<span class="leyComp">${ley("--s1", tuNombre)}${ley("--s2", "Con el " + r.nombre)}${ley("--tinta3", "Tu dinero puesto")}</span>
+      ${r.detalle} ${queCuenta} Sin impuestos ni comisiones de compra.
       ${r.aviso ? "<br>" + r.aviso : ""}`;
   }
 

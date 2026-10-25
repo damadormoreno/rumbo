@@ -406,10 +406,23 @@
     return { fechas, valores, aportado: aportadoSerie };
   }
 
+  /* ---------------------------------------------- ¿y si lo hubieras metido en un indexado? */
+  /**
+   * Qué comparación se enseña: la de toda la cartera o la de solo largo plazo. Solo hay que
+   * elegir si existe la segunda (algún producto con compras lo es y alguno no); si no, se
+   * enseña toda la cartera sin cambiar lo que el usuario dejó elegido.
+   */
+  function vistaComparacion(comp, pedido) {
+    const hayOpcion = !!(comp && comp.soloLargoPlazo && comp.soloLargoPlazo.referencias &&
+      comp.soloLargoPlazo.referencias.length);
+    const grupo = hayOpcion && pedido === "largo" ? "largo" : "todo";
+    return { hayOpcion, grupo, datos: grupo === "largo" ? comp.soloLargoPlazo : comp };
+  }
+
   return {
     leeImporte, xirr, metricas, agregaExposicion, esLiquidez, resumenLiquidez, resumenColchones,
     gruposReparto, filasReparto, repartirAportacion, normalizaReparto, tipoReparto, TIPOS_REPARTO,
     cuentaPorDefecto, cuentaEnReparto, FUERA_DE_BOLSA, periodicasPendientes,
-    resumenParaCompartir, proyeccion,
+    resumenParaCompartir, proyeccion, vistaComparacion,
   };
 });
