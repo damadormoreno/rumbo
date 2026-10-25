@@ -1511,7 +1511,9 @@
     const lotes = o => `<details class="simLotes"><summary>Compras que saldrían de «${escH(o.nombre)}»</summary>
       <div class="tablaEnv"><table class="dt"><thead><tr><th>Comprado el</th><th>Participaciones</th><th>Coste</th>
         <th>Vale hoy</th><th>Ganancia o pérdida</th></tr></thead>
-       <tbody>${o.lotes.map(l => `<tr><td>${G.fmtFecha(l.fecha)}</td><td>${unidades(l.unidades)}</td>
+       <tbody>${o.lotes.map(l => `<tr><td>${G.fmtFecha(l.fecha)}${l.staking == null ? "" : `<span class="fiscalRevisar">${
+           l.staking ? "recompensa de staking (cuesta lo que valía)" : "⚠ recompensa de staking sin valorar"}</span>`}</td>
+         <td>${unidades(l.unidades)}</td>
          <td>${G.fmtEur(l.coste)}</td><td>${G.fmtEur(l.valor)}</td><td>${signo(l.ganancia)}</td></tr>`).join("")}</tbody>
       </table></div></details>`;
     const [titulo, ...resto] = j.aviso.split(". ");

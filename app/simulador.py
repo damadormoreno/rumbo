@@ -9,8 +9,11 @@ coste y la fecha), cuánto ganarías o perderías y el IRPF que añadiría esa v
 llevas este año. Así se ve de dónde sacar el dinero pagando menos.
 
 Lo que ya llevas este año sale de fiscal.informe: tus ventas (ganancias y pérdidas) y los
-dividendos e intereses que anotaste. Con eso la nueva ganancia cae en su tramo, y una
-pérdida compensa lo ya ganado.
+dividendos, intereses y recompensas de staking valoradas que anotaste. Con eso la nueva
+ganancia cae en su tramo, y una pérdida compensa lo ya ganado.
+
+Una recompensa de staking que sale en la venta cuesta lo que valía al recibirla; si no lo
+anotaste, ese coste falta (no es 0) y se avisa de que la ganancia sale de más.
 
 Solo simula: no guarda nada. No es asesoramiento fiscal: Rumbo no sabe las pérdidas de
 años anteriores que tengas pendientes, ni tus retenciones, ni tu situación.
@@ -98,12 +101,13 @@ def _vende(lotes, unidades=None, fraccion=None):
     return motor._saca_proporcion(copia, fraccion)
 
 
-def simular(cfg, valores, producto=None, euros=None, unidades=None, hoy=None):
+def simular(cfg, valores, producto=None, euros=None, unidades=None, hoy=None, cache=None):
     """
     valores: {producto: lo que vale hoy tu posición, en euros}. Se vende 'euros' de cada producto
     que tienes (o 'unidades' de 'producto', y de los demás lo que valgan esas unidades).
     Devuelve las opciones de menos a más IRPF, cuál es la mejor y por qué. Si lo que pides de
-    'producto' es más de lo que tienes, ErrorValidacion.
+    'producto' es más de lo que tienes, ErrorValidacion. 'cache': la carpeta de precios de Yahoo,
+    de la que salen los splits (las participaciones son siempre las de después del split).
     """
     hoy = hoy or dt.date.today()
     errores = []
@@ -126,7 +130,7 @@ def simular(cfg, valores, producto=None, euros=None, unidades=None, hoy=None):
         p = productos.get(pid) or {}
         return motor.sin_html(p.get("nombre") or p.get("corto") or pid)
 
-    est, _, _ = motor.fifo_cartera(cfg, conservar_lotes=True)
+    est, _, _ = motor.fifo_cartera(cfg, cache=cache, conservar_lotes=True)
     candidatos, avisos = {}, []
     for pid, p in productos.items():
         valor = float(valores.get(pid) or 0)
@@ -159,8 +163,12 @@ def simular(cfg, valores, producto=None, euros=None, unidades=None, hoy=None):
             raise almacen.ErrorValidacion([f"De «{nombre(producto)}» solo tienes {eur(valor)} (lo que vale hoy): no "
                                            f"puedes sacar {eur(euros)}."])
 
-    previo = fiscal.informe(cfg, str(hoy.year), hoy)["totales"]
-    gan_previas, rend_previos = previo["saldo"], r2(previo["dividendos"] + previo["intereses"])
+    previo = fiscal.informe(cfg, str(hoy.year), hoy, cache=cache)["totales"]
+    gan_previas = previo["saldo"]
+    rend_previos = r2(previo["dividendos"] + previo["intereses"] + previo["staking"])
+    if previo["stakingSinValorar"]:
+        avisos.append(f"{previo['stakingSinValorar']} recompensas de staking de este año no tienen anotado lo que valían: "
+                      "no se cuentan en lo que ya llevas (son rendimiento del capital mobiliario).")
     cuota_previa = cuota_ahorro(base_ahorro(gan_previas, rend_previos))
 
     opciones = []
@@ -177,17 +185,19 @@ def simular(cfg, valores, producto=None, euros=None, unidades=None, hoy=None):
             vender = unidades if pid == producto and unidades is not None else min(euros / precio, tenias)
             trozos = _vende(lotes, unidades=vender)
             o["unidades"] = vender
-            partes = [(t[0], t[1], t[3], t[0] * precio) for t in trozos]
+            partes = [(t[0], t[1], t[3], t[0] * precio, motor.de_staking(t[2])) for t in trozos]
         else:
             # Sin participaciones (un producto anotado a mano): sale la misma parte de cada compra.
             trozos = _vende(lotes, fraccion=min(1.0, euros / valor))
             coste_total = sum(t[1] for t in trozos)
-            partes = [(None, t[1], t[3], euros * (t[1] / coste_total if coste_total else 1 / len(trozos)))
-                      for t in trozos]
+            partes = [(None, t[1], t[3], euros * (t[1] / coste_total if coste_total else 1 / len(trozos)),
+                       motor.de_staking(t[2])) for t in trozos]
         coste = sum(x[1] for x in partes)
-        o["lotes"] = [{"fecha": f, "unidades": u, "coste": r2(c), "valor": r2(v), "ganancia": r2(v - c)}
-                      for u, c, f, v in partes]
+        # staking: None si es una compra; True o False si es una recompensa valorada o sin valorar.
+        o["lotes"] = [{"fecha": f, "unidades": u, "coste": r2(c), "valor": r2(v), "ganancia": r2(v - c), "staking": st}
+                      for u, c, f, v, st in partes]
         o["coste"], o["ganancia"] = r2(coste), r2(euros - coste)
+        o["costeIncompleto"] = any(st is False for *_, st in partes)
         # Con una compra reciente del mismo producto, la pérdida aún no se puede compensar (art. 33.5 LIRPF).
         o["perdidaDiferida"] = o["ganancia"] < 0 and bool(_compra_reciente(cfg, p, hoy))
         base = base_ahorro(gan_previas + (0 if o["perdidaDiferida"] else o["ganancia"]), rend_previos)
@@ -234,7 +244,11 @@ def _avisos(cfg, p, o, hoy):
         else:
             avisos.append(f"Si vuelves a comprarlo en los {plazo.replace('un año', 'doce meses')} siguientes, esa pérdida "
                           "no podrás compensarla todavía.")
-    if any(l["coste"] <= 0 for l in o["lotes"]):
+    if o["costeIncompleto"]:
+        avisos.append("Parte de lo que venderías son recompensas de staking sin valorar: su coste es lo que valían el día "
+                      "que las recibiste, y no está anotado. La ganancia y el IRPF que ves salen de más: anótalo en "
+                      "Movimientos.")
+    if any(l["coste"] <= 0 and l["staking"] is None for l in o["lotes"]):
         avisos.append("Parte de lo que venderías no tiene coste anotado (viene de cuadrar participaciones o de un "
                       "traspaso sin coste): su ganancia saldría más alta de lo que es.")
     return avisos

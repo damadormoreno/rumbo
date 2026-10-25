@@ -669,7 +669,8 @@ def api_simular_venta():
         valores = {p["id"]: p.get("valor") for p in datos.get("productos", [])}
         try:
             res = simulador.simular(cartera(), valores, producto=a.get("producto") or None,
-                                    euros=a.get("euros"), unidades=a.get("unidades"))
+                                    euros=a.get("euros"), unidades=a.get("unidades"),
+                                    cache=os.path.join(DATOS, "cache"))
         except almacen.ErrorValidacion as e:
             return jsonify(ok=False, errores=e.errores), 400
     return jsonify(ok=True, **res)

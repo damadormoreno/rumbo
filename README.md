@@ -510,7 +510,7 @@ En **Rendimiento → «¿De dónde saco el dinero?»** escribes cuánto quieres 
 - **Qué compras saldrían**, con el mismo FIFO que «Para la Renta» (lo primero que compraste es lo primero que vendes, y los traspasos entre fondos conservan el coste y la fecha).
 - **La ganancia o pérdida** y el **IRPF estimado** con la escala de la base del ahorro, sumado a lo que ya vendiste y cobraste este año: la ganancia cae en su tramo, y una pérdida compensa lo ya ganado (y hasta el 25 % de los dividendos e intereses).
 - **Cuál paga menos y por qué**: porque tiene compras en pérdidas, porque casi no tiene plusvalía (un monetario, por ejemplo)... y cuánto te ahorras frente al que habías elegido.
-- **Avisos**: en un fondo, que un traspaso entre fondos no tributa; en una venta con pérdida, la regla de los dos meses (o de un año en fondos).
+- **Avisos**: en un fondo, que un traspaso entre fondos no tributa; en una venta con pérdida, la regla de los dos meses (o de un año en fondos); y si venderías recompensas de staking sin valorar, que su coste falta y la ganancia sale de más (las valoradas cuestan lo que valían al recibirlas, y las de este año cuentan como rendimientos).
 
 Solo simula: **no guarda nada**. Los planes de pensiones no entran (un rescate tributa como rendimiento del trabajo). Es una estimación orientativa, **no asesoramiento fiscal**: vende al valor de hoy, sin comisiones, y no sabe las pérdidas de años anteriores que tengas pendientes ni tu situación. Los tramos están en `app/simulador.py` (`TRAMOS_AHORRO`), con la fuente del BOE. Como «Para la Renta», no sale en la web publicada ni en el modo vídeo.
 

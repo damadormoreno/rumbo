@@ -3,8 +3,10 @@ import datetime as dt
 import os
 from unittest import mock
 
-from comun import ConCarpeta, cartera, etf, manual, mov
+from comun import ConCarpeta, cartera, etf, guarda_cache_yahoo, manual, mov
 from app import almacen, servidor, simulador
+from test_splits import IMP_ANTES, IMP_DESPUES, SERIE, SPLITS, compras
+from test_staking import btc, staking
 
 HOY = dt.date(2026, 10, 25)
 
@@ -224,6 +226,46 @@ class AvisosYProductos(ConCarpeta):
         self.assertTrue(any("dos meses" in a for a in o["avisos"]), o["avisos"])
         self.assertEqual(o["impuesto"], 0)            # esa pérdida aún no compensa: no ahorra nada
         self.assertIn("todavía", res["porque"])
+
+
+class Staking(ConCarpeta):
+    def test_una_recompensa_valorada_cuesta_lo_que_valia_al_recibirla(self):
+        cfg = cartera([btc()], [staking("2025-06-01", 0.1, 5000)])
+        o = opcion(simula(cfg, {"btc": 6000}, producto="btc", euros=6000), "btc")
+        self.assertEqual((o["coste"], o["ganancia"]), (5000, 1000))
+        self.assertTrue(o["lotes"][0]["staking"])
+        self.assertFalse(o["costeIncompleto"])
+        self.assertFalse(any("sin valorar" in a or "cuadrar" in a for a in o["avisos"]), o["avisos"])
+
+    def test_sin_valorar_avisa_de_que_la_ganancia_sale_de_mas(self):
+        cfg = cartera([btc()], [mov("2025-01-10", "btc", "compra", 0.1, 4000),
+                                staking("2025-06-01", 0.1)])                   # sin lo que valía
+        o = opcion(simula(cfg, {"btc": 12000}, producto="btc", euros=9000), "btc")   # 0,15: toda la compra y media recompensa
+        self.assertEqual(o["coste"], 4000)
+        self.assertTrue(o["costeIncompleto"])
+        self.assertEqual([l["staking"] for l in o["lotes"]], [None, False])
+        self.assertTrue(any("staking sin valorar" in a for a in o["avisos"]), o["avisos"])
+        self.assertFalse(any("cuadrar participaciones" in a for a in o["avisos"]), o["avisos"])
+
+    def test_las_recompensas_del_ano_cuentan_como_rendimientos(self):
+        cfg = cartera([btc(), etf("a")], [
+            mov("2024-01-10", "a", "compra", 100, 1000),
+            staking("2026-02-01", 0.05, 2000),               # rendimiento del capital mobiliario de este año
+            staking("2026-03-01", 0.01),                     # sin valorar: no se inventa
+        ])
+        res = simula(cfg, {"a": 4000, "btc": 3600}, producto="a", euros=1000)
+        self.assertEqual(res["previo"]["rendimientos"], 2000)
+        self.assertTrue(any("staking" in a for a in res["avisos"]), res["avisos"])
+
+
+class Splits(ConCarpeta):
+    def test_las_participaciones_son_las_de_despues_del_split(self):
+        cache = guarda_cache_yahoo(self.carpeta, "TEST.DE", SERIE, SPLITS)
+        cfg = cartera([etf()], compras(2))                   # 2 antiguas (8 nuevas) + 8 nuevas
+        res = simulador.simular(cfg, {"etf": 16 * 30}, producto="etf", unidades=16, hoy=HOY, cache=cache)
+        o = opcion(res, "etf")
+        self.assertEqual([round(l["unidades"], 6) for l in o["lotes"]], [8, 8])
+        self.assertEqual(o["coste"], round(IMP_ANTES + IMP_DESPUES, 2))
 
 
 class Endpoint(ConCarpeta):
