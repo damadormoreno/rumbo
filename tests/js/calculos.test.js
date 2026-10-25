@@ -311,3 +311,31 @@ test("compartir mi mes: si empezaste este año, la curva sale desde tu primer d�
   assert.equal(d.serieAno[0], 104);
   assert.ok(Math.abs(d.anoPct - (110 / 104 - 1)) < 1e-9);
 });
+
+test("proyección: sin inflación, como siempre; en euros de hoy, descontada", () => {
+  const base = { valor: 10000, aportado: 8000, anos: 10, rent: 0.07, aporte: 500, desde: "2026-10-25" };
+  const p = C.proyeccion(base);
+  assert.equal(p.fechas.length, 121);
+  assert.equal(p.fechas[0], "2026-10-01");
+  assert.equal(p.valores[0], 10000);
+  assert.equal(p.aportado[120], 8000 + 500 * 120);
+  // Cada mes crece la rentabilidad/12 y entra la aportación, como hacía el panel.
+  let v = 10000;
+  for (let i = 0; i < 120; i++) v = v * (1 + 0.07 / 12) + 500;
+  assert.equal(p.valores[120], Math.round(v));
+  assert.deepEqual(C.proyeccion({ ...base, inflacion: 0 }), p);
+
+  // En euros de hoy: cada importe se divide por lo que han subido los precios hasta su mes.
+  const r = C.proyeccion({ ...base, inflacion: 0.02 });
+  const def = Math.pow(1 + 0.02 / 12, 120);
+  cerca(r.valores[120], v / def, 1);
+  let ap = 8000;
+  for (let k = 1; k <= 120; k++) ap += 500 / Math.pow(1 + 0.02 / 12, k);
+  cerca(r.aportado[120], ap, 1);
+  assert.ok(r.valores[120] < p.valores[120] && r.aportado[120] < p.aportado[120]);
+  assert.equal(r.valores[0], 10000);                    // hoy, un euro es un euro
+
+  // Si la cartera rinde justo la inflación, sin aportar, en euros de hoy no se mueve.
+  const q = C.proyeccion({ valor: 1000, aportado: 1000, anos: 30, rent: 0.03, aporte: 0, inflacion: 0.03, desde: "2026-01-15" });
+  assert.ok(q.valores.every(x => Math.abs(x - 1000) <= 1));
+});
