@@ -339,3 +339,16 @@ test("proyección: sin inflación, como siempre; en euros de hoy, descontada", (
   const q = C.proyeccion({ valor: 1000, aportado: 1000, anos: 30, rent: 0.03, aporte: 0, inflacion: 0.03, desde: "2026-01-15" });
   assert.ok(q.valores.every(x => Math.abs(x - 1000) <= 1));
 });
+
+test("vistaComparacion: toda la cartera o solo largo plazo", () => {
+  const largo = { tuValor: 10, referencias: [{ id: "mundo" }] };
+  const comp = { tuValor: 20, referencias: [{ id: "mundo" }], soloLargoPlazo: largo };
+  assert.deepEqual(C.vistaComparacion(comp, "largo"), { hayOpcion: true, grupo: "largo", datos: largo });
+  assert.deepEqual(C.vistaComparacion(comp, "todo"), { hayOpcion: true, grupo: "todo", datos: comp });
+  assert.equal(C.vistaComparacion(comp, null).grupo, "todo");          // por defecto, toda la cartera
+  // Sin la versión de largo plazo (todo lo es, o nada), no hay que elegir: toda la cartera.
+  const sin = { tuValor: 20, referencias: [{ id: "mundo" }], soloLargoPlazo: null };
+  assert.deepEqual(C.vistaComparacion(sin, "largo"), { hayOpcion: false, grupo: "todo", datos: sin });
+  // Datos de una versión anterior de la app, sin el campo.
+  assert.equal(C.vistaComparacion({ referencias: [] }, "largo").hayOpcion, false);
+});
